@@ -1,56 +1,158 @@
-
-// kyokyoi-gpt-fn/functions/services/analyzeTasterType.js
+// kyokyoi-gpt-fn/functions/services/analyzeTasterType.js 
 
 const { OpenAI } = require("openai");
 const functions = require('firebase-functions');
 
-// OpenAI 클라이언트 초기화
-const openai = new OpenAI({
-  apiKey: functions.config().openai.key,
-});
-
-/**
- * 🎨 5가지 감상가 유형 정의
- */
-const TASTER_TYPES = {
-  'AF': {
-    modal: 'TypeE',
-    artist: '이우환',
-    name: '형식 탐구가',
-    description: '사소한 요소 속에서 깊은 의미를 읽어내는 디테일 탐정형'
-  },
-  'AC': {
-    modal: 'TypeD', 
-    artist: '백남준',
-    name: '의미 해석가',
-    description: '시대의 흐름을 꿰뚫는 사회 분석가형'
-  },
-  'IF': {
-    modal: 'TypeA',
-    artist: '쿠사마 야요이', 
-    name: '감각적 체험가',
-    description: '감각의 소용돌이에 빠져드는 몰입형'
-  },
-  'IC': {
-    modal: 'TypeC',
-    artist: '데이비드 호크니',
-    name: '감성적 스토리텔러', 
-    description: '장면 너머의 이야기를 상상하는 감상적 스토리텔러'
-  },
-  'XX': {
-    modal: 'TypeB',
-    artist: '앤디 워홀',
-    name: '다채로운 탐색가',
-    description: '경계를 넘나드는 탐험형'
+// 🔧 OpenAI 클라이언트 초기화 
+let openai;
+try {
+  const apiKey = functions.config().openai?.key;
+  if (!apiKey) {
+    throw new Error('OpenAI API 키가 설정되지 않았습니다. firebase functions:config:set openai.key="YOUR_KEY"를 실행하세요.');
   }
-};
+  
+  openai = new OpenAI({
+    apiKey: apiKey,
+    timeout: 60000, // 60초 타임아웃
+    maxRetries: 2,   // 최대 2회 재시도
+  });
+  
+  console.log('[OpenAI] ✅ 클라이언트 초기화 완료');
+} catch (error) {
+  console.error('[OpenAI] ❌ 클라이언트 초기화 실패:', error.message);
+}
 
 /**
- * 🎯 GPT 분석용 프롬프트 생성
+ * 🤖 GPT API 호출 및 분석 실행
+ * @param {Array} records - 사용자의 감상 기록 배열
+ * @returns {Object} - GPT 분석 결과
+ */
+async function analyzeTasterType(records) {
+  try {
+    console.log('[analyzeTasterType] 🚀 GPT 분석 시작');
+    console.log('[analyzeTasterType] 📊 분석할 기록 수:', records.length);
+
+    // 🔧 입력 데이터 검증
+    if (!Array.isArray(records) || records.length === 0) {
+      throw new Error('분석할 기록이 없습니다.');
+    }
+
+    // 감상문 총 길이 체크 (너무 짧으면 분석 품질 저하)
+    const totalReviewLength = records.reduce((sum, record) => sum + (record.review_text?.length || 0), 0);
+    console.log('[analyzeTasterType] 📝 총 감상문 길이:', totalReviewLength);
+    
+    if (totalReviewLength < 30) {
+      console.warn('[analyzeTasterType] ⚠️ 감상문 길이가 너무 짧음, 신뢰도 낮을 수 있음');
+    }
+
+    // 프롬프트 생성
+    const prompt = createAnalysisPrompt(records);
+    console.log('[analyzeTasterType] 📝 프롬프트 길이:', prompt.length);
+    
+    // 프롬프트가 너무 긴 경우 처리 (GPT-4o 기준 약 128k 토큰)
+    if (prompt.length > 100000) {
+      console.warn('[analyzeTasterType] ⚠️ 프롬프트가 너무 길어 일부 기록 제외');
+      const trimmedRecords = records.slice(0, Math.min(10, records.length));
+      return await analyzeTasterType(trimmedRecords); // 재귀 호출
+    }
+
+    // GPT API 호출
+    console.log('[analyzeTasterType] 🤖 OpenAI API 호출 중...');
+    const chatCompletion = await openai.chat.completions.create({
+      model: "gpt-4o", // 최신 모델 사용
+      messages: [
+        {
+          role: "system", 
+          content: `당신은 예술 감상 전문 분석가입니다. 사용자의 감상문을 정확히 분석하여 반드시 유효한 JSON 형식으로만 응답하세요. 
+          
+          중요 규칙:
+          1. 응답은 반드시 JSON 형식만 사용
+          2. 마크다운 문법이나 추가 설명 금지
+          3. primary_type은 AF, AC, IF, IC, XX 중 하나만 사용
+          4. confidence는 상, 중, 하 중 하나만 사용
+          5. 분석이 어려우면 XX 타입과 하 신뢰도 사용`
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      max_tokens: 2000,
+      temperature: 0.3, // 일관성을 위해 낮은 temperature
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+      response_format: { type: "json_object" } // JSON 형식 강제 (GPT-4o 지원)
+    });
+
+    // 응답 검증
+    if (!chatCompletion.choices || chatCompletion.choices.length === 0) {
+      throw new Error('OpenAI API에서 응답을 받지 못했습니다.');
+    }
+
+    const gptResponse = chatCompletion.choices[0].message.content.trim();
+    console.log('[analyzeTasterType] ✅ GPT 응답 수신 완료');
+    console.log('[analyzeTasterType] 📄 응답 길이:', gptResponse.length);
+    
+    // 토큰 사용량 로그 (비용 추적용)
+    if (chatCompletion.usage) {
+      console.log('[analyzeTasterType] 💰 토큰 사용량:', {
+        prompt_tokens: chatCompletion.usage.prompt_tokens,
+        completion_tokens: chatCompletion.usage.completion_tokens,
+        total_tokens: chatCompletion.usage.total_tokens
+      });
+    }
+
+    // 응답 내용 미리보기 (디버깅용, 프로덕션에서는 제거 고려)
+    console.log('[analyzeTasterType] 🔍 응답 미리보기:', gptResponse.substring(0, 200) + '...');
+
+    return gptResponse;
+
+  } catch (error) {
+    console.error('[analyzeTasterType] ❌ GPT 분석 실패:', error);
+    
+    // 🔧 OpenAI API 특정 오류 처리
+    if (error.response) {
+      const status = error.response.status;
+      const errorData = error.response.data;
+      
+      console.error('[analyzeTasterType] API 응답 에러:', {
+        status: status,
+        error_type: errorData?.error?.type,
+        error_code: errorData?.error?.code,
+        error_message: errorData?.error?.message
+      });
+      
+      // 사용자 친화적 에러 메시지 생성
+      switch (status) {
+        case 401:
+          throw new Error('OpenAI API 인증 실패: API 키를 확인해주세요.');
+        case 429:
+          throw new Error('OpenAI API 요청 한도 초과: 잠시 후 다시 시도해주세요.');
+        case 500:
+        case 502:
+        case 503:
+          throw new Error('OpenAI 서버 오류: 잠시 후 다시 시도해주세요.');
+        default:
+          throw new Error(`OpenAI API 오류 (${status}): ${errorData?.error?.message || '알 수 없는 오류'}`);
+      }
+    } else if (error.code === 'ENOTFOUND') {
+      throw new Error('네트워크 연결 오류: 인터넷 연결을 확인해주세요.');
+    } else if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+      throw new Error('OpenAI API 연결 시간 초과: 잠시 후 다시 시도해주세요.');
+    } else {
+      throw new Error(`GPT 분석 중 오류 발생: ${error.message}`);
+    }
+  }
+}
+
+/**
+ * 🎯 GPT 분석용 프롬프트 생성 (개선된 버전)
  * @param {Array} records - 사용자의 감상 기록 배열
  * @returns {string} - GPT에게 보낼 완성된 프롬프트
  */
 function createAnalysisPrompt(records) {
+  // 🔧 기본 프롬프트는 기존과 동일하게 유지하되, 예시 추가
   const basePrompt = `
 당신은 예술 감상 심리학 전문가입니다. 사용자의 전시 감상문을 분석하여 다음 5가지 예술가 유형 중 가장 유사한 유형을 찾아주세요.
 
@@ -93,12 +195,14 @@ function createAnalysisPrompt(records) {
 ## 📝 분석할 감상문들:
 `;
 
-  // 실제 사용자 감상문들을 프롬프트에 추가
+  // 실제 사용자 감상문들을 프롬프트에 추가 (개선된 형식)
   const recordsSection = records.map((record, index) => `
 **감상문 ${index + 1}**:
-- 전시: ${record.exhibition_name} | 작가: ${record.artist_name}
-- 감상문: "${record.review_text}"
+- 전시명: ${record.exhibition_name}
+- 작가명: ${record.artist_name}
 - 방문일: ${record.visit_date}
+- 감상문: "${record.review_text}"
+- 감상문 길이: ${record.review_text.length}자
 `).join('\n');
 
   const analysisInstructions = `
@@ -106,10 +210,10 @@ function createAnalysisPrompt(records) {
 1. 각 감상문에서 키워드 패턴을 찾아보세요
 2. 사용자의 표현 방식(분석적 vs 직관적)을 판단하세요  
 3. 관심 영역(형식미 vs 내용)을 파악하세요
-4. 3개 감상문의 일관성을 확인하세요
+4. ${records.length}개 감상문의 일관성을 확인하세요
 5. 가장 적합한 예술가 유형을 선택하세요
 
-## 📊 응답 형식 (JSON으로만 응답):
+## 📊 응답 형식 (유효한 JSON으로만 응답):
 {
   "primary_type": "AF/AC/IF/IC/XX 중 하나",
   "confidence": "상/중/하",
@@ -135,109 +239,18 @@ function createAnalysisPrompt(records) {
 
 ## ⚠️ 중요 규칙:
 1. primary_type은 반드시 AF, AC, IF, IC, XX 중 하나만 사용
-2. 점수는 -2, -1, 0, +1, +2 중 하나만 사용
+2. 점수는 -2, -1, 0, +1, +2 중 하나만 사용 (인지처리방식: 분석적 +2, 직관적 -2 / 관심영역: 형식미 +2, 내용 -2)
 3. confidence 기준:
-   - 상: 3개 감상문 모두 일관된 패턴, 충분한 길이 (각 10자 이상)
-   - 중: 2개 감상문에서 일관성, 적당한 길이  
+   - 상: ${records.length}개 감상문 모두 일관된 패턴, 충분한 길이 (각 10자 이상)
+   - 중: ${Math.max(2, records.length-1)}개 이상 감상문에서 일관성, 적당한 길이  
    - 하: 패턴 불일치 또는 너무 짧은 텍스트 (5자 이하)
 4. 애매한 경우 XX(앤디 워홀) 타입 선택
-5. 반드시 JSON 형식으로만 응답하고 추가 설명 금지
+5. 반드시 유효한 JSON 형식으로만 응답
 6. 감상문이 비어있거나 의미 없는 텍스트면 confidence를 '하'로 설정
+7. 추가 설명이나 마크다운 문법 절대 사용 금지
 `;
 
   return basePrompt + recordsSection + analysisInstructions;
-}
-
-/**
- * 🤖 GPT API 호출 및 분석 실행
- * @param {Array} records - 사용자의 감상 기록 배열
- * @returns {Object} - GPT 분석 결과
- */
-async function analyzeTasterType(records) {
-  try {
-    console.log('[analyzeTasterType] 🚀 GPT 분석 시작');
-    console.log('[analyzeTasterType] 📊 분석할 기록 수:', records.length);
-
-    // 프롬프트 생성
-    const prompt = createAnalysisPrompt(records);
-    console.log('[analyzeTasterType] 📝 프롬프트 길이:', prompt.length);
-
-    // GPT API 호출
-    const chatCompletion = await openai.chat.completions.create({
-      model: "gpt-4o", // 또는 "gpt-4" 또는 "gpt-3.5-turbo"
-      messages: [
-        {
-          role: "system", 
-          content: "당신은 예술 감상 전문 분석가입니다. 주어진 감상문을 정확히 분석하여 반드시 JSON 형식으로만 응답하세요. 추가 설명이나 마크다운 문법은 절대 사용하지 마세요."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      max_tokens: 2000,
-      temperature: 0.3, // 일관성을 위해 낮은 temperature
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0
-    });
-
-    const gptResponse = chatCompletion.choices[0].message.content.trim();
-    console.log('[analyzeTasterType] ✅ GPT 응답 수신 완료');
-    console.log('[analyzeTasterType] 📄 응답 길이:', gptResponse.length);
-
-    return gptResponse;
-
-  } catch (error) {
-    console.error('[analyzeTasterType] ❌ GPT 분석 실패:', error);
-    
-    // OpenAI API 에러 상세 로깅
-    if (error.response) {
-      console.error('[analyzeTasterType] API 응답 에러:', {
-        status: error.response.status,
-        statusText: error.response.statusText,
-        data: error.response.data
-      });
-    }
-    
-    throw new Error(`GPT 분석 중 오류 발생: ${error.message}`);
-  }
-}
-
-/**
- * 📊 분석 결과 구조화
- * @param {string} userId - 사용자 ID
- * @param {Object} gptData - GPT 분석 결과
- * @param {Array} records - 분석에 사용된 기록들
- * @returns {Object} - 구조화된 최종 결과
- */
-function structureAnalysisResult(userId, gptData, records) {
-  const artistType = gptData.primary_type;
-  const typeInfo = TASTER_TYPES[artistType];
-  
-  if (!typeInfo) {
-    console.warn(`[structureAnalysisResult] 알 수 없는 타입: ${artistType}, XX로 대체`);
-    return structureAnalysisResult(userId, { ...gptData, primary_type: 'XX' }, records);
-  }
-  
-  return {
-    user_id: userId,
-    artist_type: artistType,
-    artist_name: typeInfo.artist,
-    type_name: typeInfo.name,
-    type_description: typeInfo.description,
-    modal_type: typeInfo.modal,
-    confidence: gptData.confidence,
-    gpt_analysis: gptData,
-    analyzed_records_count: records.length,
-    analyzed_records: records.map(r => ({
-      exhibition_name: r.exhibition_name,
-      artist_name: r.artist_name,
-      visit_date: r.visit_date
-    })),
-    analyzed_at: new Date().toISOString(),
-    version: '1.0'
-  };
 }
 
 module.exports = {
