@@ -258,6 +258,31 @@ function createAnalysisPrompt(records) {
   return basePrompt + recordsSection + analysisInstructions;
 }
 
+/**
+ * GPT 분석 결과를 구조화하여 반환
+ * @param {string} userId - 사용자 ID
+ * @param {object} gptResult - GPT 분석 결과(JSON)
+ * @param {Array} records - 사용자의 감상 기록 배열
+ * @returns {object} - 구조화된 분석 결과
+ */
+function structureAnalysisResult(userId, gptResult, records) {
+  return {
+    user_id: userId,
+    ...gptResult,
+    records,
+    analyzed_at: new Date().toISOString(),
+  };
+}
+
+// 예술가 유형 코드 상수
+const TASTER_TYPES = {
+  AF: "이우환 스타일 (형식 탐구가)",
+  AC: "백남준 스타일 (의미 해석가)",
+  IF: "쿠사마 야요이 스타일 (감각적 체험가)",
+  IC: "호크니 스타일 (감성적 스토리텔러)",
+  XX: "앤디 워홀 스타일 (다채로운 탐색가)",
+};
+
 module.exports = {
   analyzeTasterType,
   structureAnalysisResult,
