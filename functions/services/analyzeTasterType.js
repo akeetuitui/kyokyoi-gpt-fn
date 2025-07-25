@@ -31,34 +31,48 @@ try {
 const ARTIST_TYPE_MAPPING = {
   AF: {
     artistName: "이우환",
-    typeName: "형식 탐구가", 
+    typeName: "형식 탐구가",
     modalType: "TypeE",
-    typeDescription: "당신은 예술 작품의 형식과 구조를 세밀하게 분석하는 탐구가입니다. 색채, 구도, 질감 등 시각적 요소를 과학자처럼 관찰하고 해부하며, 작품의 완성도와 기법적 우수성에 주목합니다."
+    typeDescription:
+      "당신은 예술 작품의 형식과 구조를 세밀하게 분석하는 탐구가입니다. " +
+      "색채, 구도, 질감 등 시각적 요소를 과학자처럼 관찰하고 해부하며, " +
+      "작품의 완성도와 기법적 우수성에 주목합니다.",
   },
   AC: {
     artistName: "백남준",
     typeName: "의미 해석가",
-    modalType: "TypeD", 
-    typeDescription: "당신은 작품 속 깊은 의미와 사회적 맥락을 해석하는 분석가입니다. 작가의 의도와 사회적 메시지를 평론가처럼 분석하며, 작품이 담고 있는 철학적 의미를 탐구합니다."
+    modalType: "TypeD",
+    typeDescription:
+      "당신은 작품 속 깊은 의미와 사회적 맥락을 해석하는 분석가입니다. " +
+      "작가의 의도와 사회적 메시지를 평론가처럼 분석하며, " +
+      "작품이 담고 있는 철학적 의미를 탐구합니다.",
   },
   IF: {
     artistName: "쿠사마 야요이",
     typeName: "감각적 체험가",
     modalType: "TypeA",
-    typeDescription: "당신은 감각의 소용돌이에 빠져드는 몰입형 감상가입니다. 눈앞에 펼쳐진 색과 빛, 패턴에 온몸이 먼저 반응하고, 시각적 임팩트와 즉각적인 느낌을 중시합니다."
+    typeDescription:
+      "당신은 감각의 소용돌이에 빠져드는 몰입형 감상가입니다. " +
+      "눈앞에 펼쳐진 색과 빛, 패턴에 온몸이 먼저 반응하고, " +
+      "시각적 임팩트와 즉각적인 느낌을 중시합니다.",
   },
   IC: {
-    artistName: "데이비드 호크니", 
+    artistName: "데이비드 호크니",
     typeName: "감성적 스토리텔러",
     modalType: "TypeC",
-    typeDescription: "당신은 작품을 통해 개인적인 이야기를 만들어내는 감성가입니다. 작품과 감정적으로 교감하며, 개인 경험과 연결하여 따뜻한 스토리를 만들어냅니다."
+    typeDescription:
+      "당신은 작품을 통해 개인적인 이야기를 만들어내는 감성가입니다. " +
+      "작품과 감정적으로 교감하며, 개인 경험과 연결하여 따뜻한 스토리를 만들어냅니다.",
   },
   XX: {
     artistName: "앤디 워홀",
-    typeName: "다채로운 탐색가", 
+    typeName: "다채로운 탐색가",
     modalType: "TypeB",
-    typeDescription: "당신은 유연하고 다양한 관점으로 예술을 탐색하는 탐험가입니다. 고정된 패턴 없이 상황에 따라 유연하게 반응하며, 새로운 시도와 다양성을 즐깁니다."
-  }
+    typeDescription:
+      "당신은 유연하고 다양한 관점으로 예술을 탐색하는 탐험가입니다. " +
+      "고정된 패턴 없이 상황에 따라 유연하게 반응하며, " +
+      "새로운 시도와 다양성을 즐깁니다.",
+  },
 };
 
 /**
@@ -142,7 +156,9 @@ async function analyzeTasterType(records) {
         prompt_tokens: chatCompletion.usage.prompt_tokens,
         completion_tokens: chatCompletion.usage.completion_tokens,
         total_tokens: chatCompletion.usage.total_tokens,
-        estimated_cost: `약 $${(chatCompletion.usage.total_tokens * 0.00015 / 1000).toFixed(4)}`, // gpt-4o-mini 예상 비용
+        // gpt-4o-mini 예상 비용
+        estimated_cost:
+          `약 $${(chatCompletion.usage.total_tokens * 0.00015 / 1000).toFixed(4)}`,
       });
     }
 
@@ -305,12 +321,12 @@ function createAnalysisPrompt(records) {
 function structureAnalysisResult(userId, gptResult, records) {
   const artistType = gptResult.primary_type || "XX";
   const mapping = ARTIST_TYPE_MAPPING[artistType];
-  
+
   // 분석된 기록 정보 (모든 기록 포함, 제한 없음)
-  const analyzedRecords = records.map(record => ({
+  const analyzedRecords = records.map((record) => ({
     exhibition_name: record.exhibition_name,
     artist_name: record.artist_name,
-    visit_date: record.visit_date
+    visit_date: record.visit_date,
   }));
 
   return {
@@ -327,12 +343,12 @@ function structureAnalysisResult(userId, gptResult, records) {
       confidence: gptResult.confidence,
       analysis: gptResult.analysis || {},
       matching_reason: gptResult.matching_reason || "",
-      user_characteristics: gptResult.user_characteristics || []
+      user_characteristics: gptResult.user_characteristics || [],
     },
     analyzed_records_count: records.length, // 모든 기록 수 포함
     analyzed_records: analyzedRecords, // 모든 기록 정보 포함
     analyzed_at: new Date().toISOString(),
-    version: "1.1" // 버전 업데이트
+    version: "1.1", // 버전 업데이트
   };
 }
 

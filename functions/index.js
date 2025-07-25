@@ -31,12 +31,12 @@ async function getUserNowRecords(userId) {
       // ✅ Flutter ExhibitionRecord 모델과 정확히 매핑
       const exhibitionName = data.exhibitionTitle || data.exhibition_name || "미상";
       const artistName = data.artistName || data.artist_name || "미상";
-      
+
       // ✅ 감상문 필드 정확한 매핑 (Flutter에서 사용하는 필드명)
       const reviewText = data.inspirationText || // ✅ 주요 필드
-                         data.review_text || 
+                         data.review_text ||
                          data.reviewText ||
-                         data.comment || 
+                         data.comment ||
                          data.memo || "";
 
       // ✅ 방문일 처리 (Flutter 필드명과 매핑)
@@ -62,8 +62,10 @@ async function getUserNowRecords(userId) {
               : data.created_at)
             : "미상",
         });
-        
-        console.log(`[getUserNowRecords] ✅ 유효한 기록 추가: ${exhibitionName} (감상문 ${reviewText.length}자)`);
+
+        console.log(
+          `[getUserNowRecords] ✅ 유효한 기록 추가: ${exhibitionName} (감상문 ${reviewText.length}자)`,
+        );
       } else {
         console.log(`[getUserNowRecords] ❌ 감상문 부족으로 제외: ${doc.id} (${exhibitionName})`);
         console.log(`[getUserNowRecords] 📝 감상문 내용: "${reviewText}" (길이: ${reviewText.length})`);
@@ -273,8 +275,12 @@ exports.analyzeTasterType = functions
       // 6. Firebase 저장
       await saveTasterTypeResult(userId, finalResult);
 
-      console.log(`[analyzeTasterType] ✅ 분석 완료: ${finalResult.artist_type} (${finalResult.artist_name})`);
-      console.log(`[analyzeTasterType] 🎭 모달 타입: ${finalResult.modal_type}, 신뢰도: ${finalResult.confidence}`);
+      console.log(
+        `[analyzeTasterType] ✅ 분석 완료: ${finalResult.artist_type} (${finalResult.artist_name})`,
+      );
+      console.log(
+        `[analyzeTasterType] 🎭 모달 타입: ${finalResult.modal_type}, 신뢰도: ${finalResult.confidence}`,
+      );
 
       return {
         success: true,
