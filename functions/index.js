@@ -29,19 +29,23 @@ async function getUserNowRecords(userId) {
       const data = doc.data();
 
       // Flutter ExhibitionRecord 모델과 필드명 매칭
-      const exhibitionName = data.exhibitionTitle || data.exhibition_name || data.exhibitionName || "미상";
+      const exhibitionName = data.exhibitionTitle || data.exhibition_name ||
+        data.exhibitionName || "미상";
       const artistName = data.artistName || data.artist_name || "미상";
-
       // 감상문 필드 확인 (여러 가능성 체크)
       const reviewText = data.inspirationText || data.review_text || data.reviewText ||
-                        data.inspiration_text || data.comment || data.memo || "";
+        data.inspiration_text || data.comment || data.memo || "";
 
       // 방문일 처리
       let visitDate = "미상";
       if (data.visit_date) {
-        visitDate = data.visit_date.toDate ? data.visit_date.toDate().toISOString().split("T")[0] : data.visit_date;
+        visitDate = data.visit_date.toDate
+          ? data.visit_date.toDate().toISOString().split("T")[0]
+          : data.visit_date;
       } else if (data.visitDate) {
-        visitDate = data.visitDate.toDate ? data.visitDate.toDate().toISOString().split("T")[0] : data.visitDate;
+        visitDate = data.visitDate.toDate
+          ? data.visitDate.toDate().toISOString().split("T")[0]
+          : data.visitDate;
       }
 
       // 감상문이 유의미하게 있는 기록만 포함 (최소 3자 이상)
@@ -52,8 +56,10 @@ async function getUserNowRecords(userId) {
           artist_name: artistName,
           review_text: reviewText.trim(),
           visit_date: visitDate,
-          created_at: data.created_at ?
-            (data.created_at.toDate ? data.created_at.toDate().toISOString() : data.created_at)
+          created_at: data.created_at
+            ? (data.created_at.toDate
+              ? data.created_at.toDate().toISOString()
+              : data.created_at)
             : "미상",
         });
       } else {
