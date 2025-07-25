@@ -1,4 +1,4 @@
-// kyokyoi-gpt-fn/functions/index.js
+// kyokyoi-gpt-fn/functions/index.js (필드명 매핑 수정)
 
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
@@ -9,7 +9,7 @@ admin.initializeApp();
 const db = admin.firestore();
 
 /**
- * 사용자의 NOW 기록 가져오기 (Flutter ExhibitionRecord 모델과 필드명 매칭)
+ * 사용자의 NOW 기록 가져오기 (Flutter 필드명과 정확히 매핑)
  */
 async function getUserNowRecords(userId) {
   try {
@@ -17,9 +17,9 @@ async function getUserNowRecords(userId) {
 
     const recordsRef = db.collection("users")
       .doc(userId)
-      .collection("now_records")
-      .orderBy("created_at", "desc")
-      .limit(15); // 여유롭게 15개까지 조회
+      .collection("now_records")  // ✅ Flutter와 정확히 일치
+      .orderBy("created_at", "desc")  // ✅ created_at으로 정렬
+      .limit(20); // 최대 20개까지 조회
 
     const snapshot = await recordsRef.get();
     console.log(`[getUserNowRecords] Firestore에서 ${snapshot.size}개 문서 조회됨`);
@@ -28,24 +28,24 @@ async function getUserNowRecords(userId) {
     snapshot.forEach((doc) => {
       const data = doc.data();
 
-      // Flutter ExhibitionRecord 모델과 필드명 매칭
-      const exhibitionName = data.exhibitionTitle || data.exhibition_name ||
-        data.exhibitionName || "미상";
+      // ✅ Flutter ExhibitionRecord 모델과 정확히 매핑
+      const exhibitionName = data.exhibitionTitle || data.exhibition_name || "미상";
       const artistName = data.artistName || data.artist_name || "미상";
-      // 감상문 필드 확인 (여러 가능성 체크)
-      const reviewText = data.inspirationText || data.review_text || data.reviewText ||
-        data.inspiration_text || data.comment || data.memo || "";
+      
+      // ✅ 감상문 필드 정확한 매핑 (Flutter에서 사용하는 필드명)
+      const reviewText = data.inspirationText || // ✅ 주요 필드
+                         data.review_text || 
+                         data.reviewText ||
+                         data.comment || 
+                         data.memo || "";
 
-      // 방문일 처리
+      // ✅ 방문일 처리 (Flutter 필드명과 매핑)
       let visitDate = "미상";
-      if (data.visit_date) {
-        visitDate = data.visit_date.toDate
-          ? data.visit_date.toDate().toISOString().split("T")[0]
-          : data.visit_date;
-      } else if (data.visitDate) {
-        visitDate = data.visitDate.toDate
-          ? data.visitDate.toDate().toISOString().split("T")[0]
-          : data.visitDate;
+      if (data.visit_date || data.visitDate) {
+        const dateField = data.visit_date || data.visitDate;
+        visitDate = dateField.toDate
+          ? dateField.toDate().toISOString().split("T")[0]
+          : dateField;
       }
 
       // 감상문이 유의미하게 있는 기록만 포함 (최소 3자 이상)
@@ -62,32 +62,36 @@ async function getUserNowRecords(userId) {
               : data.created_at)
             : "미상",
         });
+        
+        console.log(`[getUserNowRecords] ✅ 유효한 기록 추가: ${exhibitionName} (감상문 ${reviewText.length}자)`);
       } else {
-        console.log(`[getUserNowRecords] 감상문 부족으로 제외된 기록: ${doc.id} (길이: ${reviewText.length})`);
+        console.log(`[getUserNowRecords] ❌ 감상문 부족으로 제외: ${doc.id} (${exhibitionName})`);
+        console.log(`[getUserNowRecords] 📝 감상문 내용: "${reviewText}" (길이: ${reviewText.length})`);
       }
     });
 
-    console.log(`[getUserNowRecords] ${records.length}개 유효한 기록 조회 완료`);
+    console.log(`[getUserNowRecords] ✅ ${records.length}개 유효한 기록 조회 완료`);
 
     // 샘플 로그 (첫 번째 기록)
     if (records.length > 0) {
-      console.log("[getUserNowRecords] 첫 번째 기록 샘플:", {
+      console.log("[getUserNowRecords] 📋 첫 번째 기록 샘플:", {
         exhibition: records[0].exhibition_name,
         artist: records[0].artist_name,
         review_length: records[0].review_text.length,
-        review_preview: records[0].review_text.substring(0, 20) + "...",
+        review_preview: records[0].review_text.substring(0, 30) + "...",
+        visit_date: records[0].visit_date,
       });
     }
 
     return records;
   } catch (error) {
-    console.error("[getUserNowRecords] 기록 조회 실패:", error);
+    console.error("[getUserNowRecords] ❌ 기록 조회 실패:", error);
     throw error;
   }
 }
 
 /**
- * GPT 응답 검증 및 파싱
+ * GPT 응답 검증 및 파싱 (기존과 동일)
  */
 function validateAndParseGPTResponse(gptResponse) {
   try {
@@ -151,7 +155,7 @@ async function saveTasterTypeResult(userId, result) {
 
     await analysisRef.set(result);
 
-    // users/{userId} 문서에도 요약 정보 저장
+    // users/{userId} 문서에도 요약 정보 저장 (선택사항)
     const userRef = db.collection("users").doc(userId);
     await userRef.update({
       taster_type: {
@@ -164,9 +168,9 @@ async function saveTasterTypeResult(userId, result) {
       },
     });
 
-    console.log(`[saveTasterType] 저장 완료: ${result.artist_type}`);
+    console.log(`[saveTasterType] ✅ 저장 완료: ${result.artist_type} (${result.artist_name})`);
   } catch (error) {
-    console.error("[saveTasterType] 저장 실패:", error);
+    console.error("[saveTasterType] ❌ 저장 실패:", error);
     throw error;
   }
 }
@@ -191,14 +195,16 @@ async function getExistingAnalysis(userId) {
       const hoursAgo = (Date.now() - analyzedAt.getTime()) / (1000 * 60 * 60);
 
       if (hoursAgo < 24) {
-        console.log(`[getExisting] 기존 결과 재사용 (${hoursAgo.toFixed(1)}시간 전)`);
+        console.log(`[getExisting] ♻️ 기존 결과 재사용 (${hoursAgo.toFixed(1)}시간 전)`);
         return data;
+      } else {
+        console.log(`[getExisting] ⏰ 기존 결과 만료 (${hoursAgo.toFixed(1)}시간 전) - 새로 분석 필요`);
       }
     }
 
     return null;
   } catch (error) {
-    console.error("[getExisting] 기존 결과 확인 실패:", error);
+    console.error("[getExisting] ❌ 기존 결과 확인 실패:", error);
     return null;
   }
 }
@@ -209,7 +215,7 @@ async function getExistingAnalysis(userId) {
 exports.analyzeTasterType = functions
   .region("asia-northeast3") // 서울 리전
   .runWith({
-    timeoutSeconds: 60,
+    timeoutSeconds: 120, // 2분으로 증가 (GPT 분석 시간 고려)
     memory: "512MB",
   })
   .https.onCall(async (data, context) => {
@@ -223,12 +229,12 @@ exports.analyzeTasterType = functions
       }
 
       const userId = context.auth.uid;
-      console.log(`[analyzeTasterType] 사용자 ${userId} 분석 요청`);
+      console.log(`[analyzeTasterType] 🎯 사용자 ${userId} 분석 요청`);
 
       // 1. 기존 분석 결과 확인
       const existingResult = await getExistingAnalysis(userId);
       if (existingResult) {
-        console.log("[analyzeTasterType] 기존 결과 반환");
+        console.log("[analyzeTasterType] ♻️ 기존 결과 반환");
         return {
           success: true,
           result: existingResult,
@@ -240,14 +246,16 @@ exports.analyzeTasterType = functions
       const records = await getUserNowRecords(userId);
 
       if (records.length < 3) {
-        console.log(`[analyzeTasterType] 기록 부족: ${records.length}개`);
+        console.log(`[analyzeTasterType] ❌ 기록 부족: ${records.length}개`);
         throw new functions.https.HttpsError(
           "failed-precondition",
-          `분석을 위해 최소 3개의 감상 기록이 필요합니다. (현재: ${records.length}개)`,
+          `분석을 위해 최소 3개의 의미있는 감상 기록이 필요합니다. (현재: ${records.length}개)\n\n감상문이 3자 이상인 기록만 분석에 사용됩니다.`,
         );
       }
 
-      // 3. GPT 분석 실행 (services/analyzeTasterType.js 사용)
+      console.log(`[analyzeTasterType] ✅ 분석 대상 기록: ${records.length}개`);
+
+      // 3. GPT 분석 실행
       const gptResponse = await analyzeTasterType(records);
 
       // 4. 응답 검증
@@ -259,13 +267,14 @@ exports.analyzeTasterType = functions
         );
       }
 
-      // 5. 결과 구조화 (services/analyzeTasterType.js 사용)
+      // 5. 결과 구조화
       const finalResult = structureAnalysisResult(userId, validationResult.data, records);
 
       // 6. Firebase 저장
       await saveTasterTypeResult(userId, finalResult);
 
-      console.log(`[analyzeTasterType] 분석 완료: ${finalResult.artist_type}`);
+      console.log(`[analyzeTasterType] ✅ 분석 완료: ${finalResult.artist_type} (${finalResult.artist_name})`);
+      console.log(`[analyzeTasterType] 🎭 모달 타입: ${finalResult.modal_type}, 신뢰도: ${finalResult.confidence}`);
 
       return {
         success: true,
@@ -273,7 +282,7 @@ exports.analyzeTasterType = functions
         from_cache: false,
       };
     } catch (error) {
-      console.error("[analyzeTasterType] 분석 실패:", error);
+      console.error("[analyzeTasterType] ❌ 분석 실패:", error);
 
       if (error instanceof functions.https.HttpsError) {
         throw error;
@@ -310,12 +319,14 @@ exports.getTasterType = functions
         );
       }
 
+      console.log(`[getTasterType] ✅ 기존 결과 조회 성공: ${result.artist_type}`);
+
       return {
         success: true,
         result: result,
       };
     } catch (error) {
-      console.error("[getTasterType] 조회 실패:", error);
+      console.error("[getTasterType] ❌ 조회 실패:", error);
 
       if (error instanceof functions.https.HttpsError) {
         throw error;
@@ -328,9 +339,7 @@ exports.getTasterType = functions
     }
   });
 
-// ------------------------------
-// 🎯 POST API 방식 추가
-// ------------------------------
+// REST API 방식도 동일하게 수정
 const express = require("express");
 const cors = require("cors");
 const app = express();
@@ -362,7 +371,6 @@ app.post("/analyze-taster", async (req, res) => {
     }
 
     const finalResult = structureAnalysisResult(user_id, validationResult.data, records);
-
     await saveTasterTypeResult(user_id, finalResult);
 
     return res.status(200).json({
