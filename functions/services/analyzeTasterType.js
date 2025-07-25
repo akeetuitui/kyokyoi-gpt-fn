@@ -1,25 +1,25 @@
-// kyokyoi-gpt-fn/functions/services/analyzeTasterType.js 
+// kyokyoi-gpt-fn/functions/services/analyzeTasterType.js
 
 const { OpenAI } = require("openai");
-const functions = require('firebase-functions');
+const functions = require("firebase-functions");
 
-// 🔧 OpenAI 클라이언트 초기화 
+// 🔧 OpenAI 클라이언트 초기화
 let openai;
 try {
   const apiKey = functions.config().openai?.key;
   if (!apiKey) {
-    throw new Error('OpenAI API 키가 설정되지 않았습니다. firebase functions:config:set openai.key="YOUR_KEY"를 실행하세요.');
+    throw new Error("OpenAI API 키가 설정되지 않았습니다. firebase functions:config:set openai.key=\"YOUR_KEY\"를 실행하세요.");
   }
-  
+
   openai = new OpenAI({
     apiKey: apiKey,
     timeout: 60000, // 60초 타임아웃
     maxRetries: 2,   // 최대 2회 재시도
   });
-  
-  console.log('[OpenAI] ✅ 클라이언트 초기화 완료');
+
+  console.log("[OpenAI] ✅ 클라이언트 초기화 완료");
 } catch (error) {
-  console.error('[OpenAI] ❌ 클라이언트 초기화 실패:', error.message);
+  console.error("[OpenAI] ❌ 클라이언트 초기화 실패:", error.message);
 }
 
 /**
@@ -29,40 +29,40 @@ try {
  */
 async function analyzeTasterType(records) {
   try {
-    console.log('[analyzeTasterType] 🚀 GPT 분석 시작');
-    console.log('[analyzeTasterType] 📊 분석할 기록 수:', records.length);
+    console.log("[analyzeTasterType] 🚀 GPT 분석 시작");
+    console.log("[analyzeTasterType] 📊 분석할 기록 수:", records.length);
 
     // 🔧 입력 데이터 검증
     if (!Array.isArray(records) || records.length === 0) {
-      throw new Error('분석할 기록이 없습니다.');
+      throw new Error("분석할 기록이 없습니다.");
     }
 
     // 감상문 총 길이 체크 (너무 짧으면 분석 품질 저하)
     const totalReviewLength = records.reduce((sum, record) => sum + (record.review_text?.length || 0), 0);
-    console.log('[analyzeTasterType] 📝 총 감상문 길이:', totalReviewLength);
-    
+    console.log("[analyzeTasterType] 📝 총 감상문 길이:", totalReviewLength);
+
     if (totalReviewLength < 30) {
-      console.warn('[analyzeTasterType] ⚠️ 감상문 길이가 너무 짧음, 신뢰도 낮을 수 있음');
+      console.warn("[analyzeTasterType] ⚠️ 감상문 길이가 너무 짧음, 신뢰도 낮을 수 있음");
     }
 
     // 프롬프트 생성
     const prompt = createAnalysisPrompt(records);
-    console.log('[analyzeTasterType] 📝 프롬프트 길이:', prompt.length);
-    
+    console.log("[analyzeTasterType] 📝 프롬프트 길이:", prompt.length);
+
     // 프롬프트가 너무 긴 경우 처리 (GPT-4o 기준 약 128k 토큰)
     if (prompt.length > 100000) {
-      console.warn('[analyzeTasterType] ⚠️ 프롬프트가 너무 길어 일부 기록 제외');
+      console.warn("[analyzeTasterType] ⚠️ 프롬프트가 너무 길어 일부 기록 제외");
       const trimmedRecords = records.slice(0, Math.min(10, records.length));
       return await analyzeTasterType(trimmedRecords); // 재귀 호출
     }
 
     // GPT API 호출
-    console.log('[analyzeTasterType] 🤖 OpenAI API 호출 중...');
+    console.log("[analyzeTasterType] 🤖 OpenAI API 호출 중...");
     const chatCompletion = await openai.chat.completions.create({
       model: "gpt-4o", // 최신 모델 사용
       messages: [
         {
-          role: "system", 
+          role: "system",
           content: `당신은 예술 감상 전문 분석가입니다. 사용자의 감상문을 정확히 분석하여 반드시 유효한 JSON 형식으로만 응답하세요. 
           
           중요 규칙:
@@ -70,76 +70,75 @@ async function analyzeTasterType(records) {
           2. 마크다운 문법이나 추가 설명 금지
           3. primary_type은 AF, AC, IF, IC, XX 중 하나만 사용
           4. confidence는 상, 중, 하 중 하나만 사용
-          5. 분석이 어려우면 XX 타입과 하 신뢰도 사용`
+          5. 분석이 어려우면 XX 타입과 하 신뢰도 사용`,
         },
         {
           role: "user",
-          content: prompt
-        }
+          content: prompt,
+        },
       ],
       max_tokens: 2000,
       temperature: 0.3, // 일관성을 위해 낮은 temperature
       top_p: 1,
       frequency_penalty: 0,
       presence_penalty: 0,
-      response_format: { type: "json_object" } // JSON 형식 강제 (GPT-4o 지원)
+      response_format: { type: "json_object" }, // JSON 형식 강제 (GPT-4o 지원)
     });
 
     // 응답 검증
     if (!chatCompletion.choices || chatCompletion.choices.length === 0) {
-      throw new Error('OpenAI API에서 응답을 받지 못했습니다.');
+      throw new Error("OpenAI API에서 응답을 받지 못했습니다.");
     }
 
     const gptResponse = chatCompletion.choices[0].message.content.trim();
-    console.log('[analyzeTasterType] ✅ GPT 응답 수신 완료');
-    console.log('[analyzeTasterType] 📄 응답 길이:', gptResponse.length);
-    
+    console.log("[analyzeTasterType] ✅ GPT 응답 수신 완료");
+    console.log("[analyzeTasterType] 📄 응답 길이:", gptResponse.length);
+
     // 토큰 사용량 로그 (비용 추적용)
     if (chatCompletion.usage) {
-      console.log('[analyzeTasterType] 💰 토큰 사용량:', {
+      console.log("[analyzeTasterType] 💰 토큰 사용량:", {
         prompt_tokens: chatCompletion.usage.prompt_tokens,
         completion_tokens: chatCompletion.usage.completion_tokens,
-        total_tokens: chatCompletion.usage.total_tokens
+        total_tokens: chatCompletion.usage.total_tokens,
       });
     }
 
     // 응답 내용 미리보기 (디버깅용, 프로덕션에서는 제거 고려)
-    console.log('[analyzeTasterType] 🔍 응답 미리보기:', gptResponse.substring(0, 200) + '...');
+    console.log("[analyzeTasterType] 🔍 응답 미리보기:", gptResponse.substring(0, 200) + "...");
 
     return gptResponse;
-
   } catch (error) {
-    console.error('[analyzeTasterType] ❌ GPT 분석 실패:', error);
-    
+    console.error("[analyzeTasterType] ❌ GPT 분석 실패:", error);
+
     // 🔧 OpenAI API 특정 오류 처리
     if (error.response) {
       const status = error.response.status;
       const errorData = error.response.data;
-      
-      console.error('[analyzeTasterType] API 응답 에러:', {
+
+      console.error("[analyzeTasterType] API 응답 에러:", {
         status: status,
         error_type: errorData?.error?.type,
         error_code: errorData?.error?.code,
-        error_message: errorData?.error?.message
+        error_message: errorData?.error?.message,
       });
-      
+
       // 사용자 친화적 에러 메시지 생성
       switch (status) {
-        case 401:
-          throw new Error('OpenAI API 인증 실패: API 키를 확인해주세요.');
-        case 429:
-          throw new Error('OpenAI API 요청 한도 초과: 잠시 후 다시 시도해주세요.');
-        case 500:
-        case 502:
-        case 503:
-          throw new Error('OpenAI 서버 오류: 잠시 후 다시 시도해주세요.');
-        default:
-          throw new Error(`OpenAI API 오류 (${status}): ${errorData?.error?.message || '알 수 없는 오류'}`);
+      case 401:
+        throw new Error("OpenAI API 인증 실패: API 키를 확인해주세요.");
+      case 429:
+        throw new Error("OpenAI API 요청 한도 초과: 잠시 후 다시 시도해주세요.");
+      case 500:
+      case 502:
+      case 503:
+        throw new Error("OpenAI 서버 오류: 잠시 후 다시 시도해주세요.");
+      default:
+        throw new Error(`OpenAI API 오류 (${status}): ${errorData?.error?.message || "알 수 없는 오류"}`);
       }
-    } else if (error.code === 'ENOTFOUND') {
-      throw new Error('네트워크 연결 오류: 인터넷 연결을 확인해주세요.');
-    } else if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-      throw new Error('OpenAI API 연결 시간 초과: 잠시 후 다시 시도해주세요.');
+    } else if (error.code === "ENOTFOUND") {
+      throw new Error("네트워크 연결 오류: 인터넷 연결을 확인해주세요.");
+    } else if (error.code === "ECONNRESET" || error.code === "ETIMEDOUT") {
+      throw new Error("OpenAI API 연결 시간 초과: 잠시 후 다시 시도해주세요.");
     } else {
       throw new Error(`GPT 분석 중 오류 발생: ${error.message}`);
     }
@@ -203,7 +202,7 @@ function createAnalysisPrompt(records) {
 - 방문일: ${record.visit_date}
 - 감상문: "${record.review_text}"
 - 감상문 길이: ${record.review_text.length}자
-`).join('\n');
+`).join("\n");
 
   const analysisInstructions = `
 ## 📊 분석 방법:
@@ -257,5 +256,5 @@ module.exports = {
   analyzeTasterType,
   structureAnalysisResult,
   TASTER_TYPES,
-  createAnalysisPrompt // 테스트용으로 export
+  createAnalysisPrompt, // 테스트용으로 export
 };
