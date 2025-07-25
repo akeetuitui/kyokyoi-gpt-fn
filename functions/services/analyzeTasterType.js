@@ -10,7 +10,7 @@ try {
   if (!apiKey) {
     throw new Error(
       "OpenAI API 키가 설정되지 않았습니다. " +
-      "firebase functions:config:set openai.key=\"YOUR_KEY\"를 실행하세요."
+      "firebase functions:config:set openai.key=\"YOUR_KEY\"를 실행하세요.",
     );
   }
 
@@ -43,7 +43,7 @@ async function analyzeTasterType(records) {
     // 감상문 총 길이 체크 (너무 짧으면 분석 품질 저하)
     const totalReviewLength = records.reduce(
       (sum, record) => sum + (record.review_text?.length || 0),
-      0
+      0,
     );
     console.log("[analyzeTasterType] 📝 총 감상문 길이:", totalReviewLength);
 
@@ -70,7 +70,13 @@ async function analyzeTasterType(records) {
         {
           role: "system",
           content:
-            `당신은 예술 감상 전문 분석가입니다. 사용자의 감상문을 정확히 분석하여 반드시 유효한 JSON 형식으로만 응답하세요.\n\n중요 규칙:\n1. 응답은 반드시 JSON 형식만 사용\n2. 마크다운 문법이나 추가 설명 금지\n3. primary_type은 AF, AC, IF, IC, XX 중 하나만 사용\n4. confidence는 상, 중, 하 중 하나만 사용\n5. 분석이 어려우면 XX 타입과 하 신뢰도 사용`,
+            "당신은 예술 감상 전문 분석가입니다. 사용자의 감상문을 정확히 분석하여 반드시 유효한 JSON 형식으로만 응답하세요.\n\n" +
+            "중요 규칙:\n" +
+            "1. 응답은 반드시 JSON 형식만 사용\n" +
+            "2. 마크다운 문법이나 추가 설명 금지\n" +
+            "3. primary_type은 AF, AC, IF, IC, XX 중 하나만 사용\n" +
+            "4. confidence는 상, 중, 하 중 하나만 사용\n" +
+            "5. 분석이 어려우면 XX 타입과 하 신뢰도 사용",
         },
         {
           role: "user",
