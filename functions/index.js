@@ -1,45 +1,72 @@
-// kyokyoi-gpt-fn/functions/index.js (필드명 매핑 수정)
+// kyokyoi-gpt-fn/functions/index.js (Cross-project Firestore 접근)
 
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const { analyzeTasterType, structureAnalysisResult } = require("./services/analyzeTasterType");
 
-// Firebase Admin 초기화
+// 🔧 Firebase Admin 초기화 (두 개의 프로젝트 접근)
+// 1. 기본 앱 (kyokyoi-gpt-fn 프로젝트 - 결과 저장용)
 admin.initializeApp();
-const db = admin.firestore();
+const gptDb = admin.firestore(); // kyokyoi-gpt-fn DB
+
+// 2. kyokyoi 프로젝트 앱 (사용자 데이터 읽기용)
+let kyokyoiDb;
+try {
+  // 서비스 계정 키 파일로 kyokyoi 프로젝트에 접근
+  const serviceAccount = require("./kyokyoi-service-account.json");
+
+  const kyokyoiApp = admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    projectId: "kyokyoi", // kyokyoi 프로젝트 ID
+  }, "kyokyoi");
+
+  kyokyoiDb = kyokyoiApp.firestore();
+  console.log("[Firebase] ✅ kyokyoi 프로젝트 연결 성공");
+} catch (error) {
+  console.error("[Firebase] ❌ kyokyoi 프로젝트 연결 실패:", error.message);
+  console.log("[Firebase] 📝 kyokyoi-service-account.json 파일이 functions/ 폴더에 있는지 확인하세요");
+}
 
 /**
- * 사용자의 NOW 기록 가져오기 (Flutter 필드명과 정확히 매핑)
+ * kyokyoi 프로젝트에서 사용자의 NOW 기록 가져오기 (Cross-project 접근)
  */
 async function getUserNowRecords(userId) {
   try {
-    console.log(`[getUserNowRecords] 사용자 ${userId}의 기록 조회 시작`);
+    console.log(`[getUserNowRecords] 🔍 kyokyoi 프로젝트에서 사용자 ${userId}의 기록 조회 시작`);
 
-    const recordsRef = db.collection("users")
+    // kyokyoi 프로젝트 연결 확인
+    if (!kyokyoiDb) {
+      throw new Error(
+        "kyokyoi 프로젝트에 연결할 수 없습니다. " +
+        "kyokyoi-service-account.json 파일을 확인하세요.",
+      );
+    }
+
+    const recordsRef = kyokyoiDb.collection("users")
       .doc(userId)
-      .collection("now_records")  // ✅ Flutter와 정확히 일치
-      .orderBy("created_at", "desc")  // ✅ created_at으로 정렬
-      .limit(20); // 최대 20개까지 조회
+      .collection("now_records")  // ✅ kyokyoi 프로젝트의 컬렉션
+      .orderBy("created_at", "desc")
+      .limit(20);
 
     const snapshot = await recordsRef.get();
-    console.log(`[getUserNowRecords] Firestore에서 ${snapshot.size}개 문서 조회됨`);
+    console.log(`[getUserNowRecords] 📊 kyokyoi에서 ${snapshot.size}개 문서 조회됨`);
 
     const records = [];
     snapshot.forEach((doc) => {
       const data = doc.data();
 
-      // ✅ Flutter ExhibitionRecord 모델과 정확히 매핑
+      // ✅ kyokyoi Flutter 앱의 ExhibitionRecord 모델과 매핑
       const exhibitionName = data.exhibitionTitle || data.exhibition_name || "미상";
       const artistName = data.artistName || data.artist_name || "미상";
 
-      // ✅ 감상문 필드 정확한 매핑 (Flutter에서 사용하는 필드명)
+      // ✅ 감상문 필드 정확한 매핑 (kyokyoi 앱에서 사용하는 필드명)
       const reviewText = data.inspirationText || // ✅ 주요 필드
                          data.review_text ||
                          data.reviewText ||
                          data.comment ||
                          data.memo || "";
 
-      // ✅ 방문일 처리 (Flutter 필드명과 매핑)
+      // ✅ 방문일 처리 (kyokyoi 앱 필드명과 매핑)
       let visitDate = "미상";
       if (data.visit_date || data.visitDate) {
         const dateField = data.visit_date || data.visitDate;
@@ -72,7 +99,7 @@ async function getUserNowRecords(userId) {
       }
     });
 
-    console.log(`[getUserNowRecords] ✅ ${records.length}개 유효한 기록 조회 완료`);
+    console.log(`[getUserNowRecords] ✅ kyokyoi에서 ${records.length}개 유효한 기록 조회 완료`);
 
     // 샘플 로그 (첫 번째 기록)
     if (records.length > 0) {
@@ -87,7 +114,7 @@ async function getUserNowRecords(userId) {
 
     return records;
   } catch (error) {
-    console.error("[getUserNowRecords] ❌ 기록 조회 실패:", error);
+    console.error("[getUserNowRecords] ❌ kyokyoi 프로젝트 기록 조회 실패:", error);
     throw error;
   }
 }
@@ -143,34 +170,49 @@ function validateAndParseGPTResponse(gptResponse) {
 }
 
 /**
- * 결과를 Firebase에 저장
+ * 분석 결과를 두 프로젝트에 저장 (Cross-project)
  */
 async function saveTasterTypeResult(userId, result) {
   try {
     console.log(`[saveTasterType] 사용자 ${userId} 결과 저장 시작`);
 
-    // users/{userId}/taster_analysis 문서에 저장
-    const analysisRef = db.collection("users")
+    // 1. ✅ kyokyoi-gpt-fn 프로젝트에 저장 (분석 이력 관리용)
+    const gptAnalysisRef = gptDb.collection("users")
       .doc(userId)
       .collection("taster_analysis")
       .doc("latest");
 
-    await analysisRef.set(result);
+    await gptAnalysisRef.set(result);
+    console.log("[saveTasterType] ✅ kyokyoi-gpt-fn에 저장 완료");
 
-    // users/{userId} 문서에도 요약 정보 저장 (선택사항)
-    const userRef = db.collection("users").doc(userId);
-    await userRef.update({
-      taster_type: {
-        artist_type: result.artist_type,
-        artist_name: result.artist_name,
-        modal_type: result.modal_type,
-        confidence: result.confidence,
-        analyzed_at: admin.firestore.Timestamp.now(),
-        has_analysis: true,
-      },
-    });
+    // 2. ✅ kyokyoi 프로젝트에도 저장 (Flutter 앱에서 사용할 수 있도록)
+    if (kyokyoiDb) {
+      const kyokyoiAnalysisRef = kyokyoiDb.collection("users")
+        .doc(userId)
+        .collection("taster_analysis")
+        .doc("latest");
 
-    console.log(`[saveTasterType] ✅ 저장 완료: ${result.artist_type} (${result.artist_name})`);
+      await kyokyoiAnalysisRef.set(result);
+
+      // kyokyoi 프로젝트의 users/{userId} 문서에도 요약 정보 저장
+      const kyokyoiUserRef = kyokyoiDb.collection("users").doc(userId);
+      await kyokyoiUserRef.update({
+        taster_type: {
+          artist_type: result.artist_type,
+          artist_name: result.artist_name,
+          modal_type: result.modal_type,
+          confidence: result.confidence,
+          analyzed_at: admin.firestore.Timestamp.now(),
+          has_analysis: true,
+        },
+      });
+
+      console.log("[saveTasterType] ✅ kyokyoi 프로젝트에도 저장 완료");
+    } else {
+      console.warn("[saveTasterType] ⚠️ kyokyoi 프로젝트 연결 없음 - kyokyoi-gpt-fn에만 저장됨");
+    }
+
+    console.log(`[saveTasterType] 🎯 최종 저장 완료: ${result.artist_type} (${result.artist_name})`);
   } catch (error) {
     console.error("[saveTasterType] ❌ 저장 실패:", error);
     throw error;
@@ -178,29 +220,51 @@ async function saveTasterTypeResult(userId, result) {
 }
 
 /**
- * 기존 분석 결과 확인
+ * 기존 분석 결과 확인 (Cross-project)
  */
 async function getExistingAnalysis(userId) {
   try {
-    const analysisRef = db.collection("users")
+    // 1. 먼저 kyokyoi 프로젝트에서 확인 (Flutter 앱이 주로 사용)
+    if (kyokyoiDb) {
+      const kyokyoiAnalysisRef = kyokyoiDb.collection("users")
+        .doc(userId)
+        .collection("taster_analysis")
+        .doc("latest");
+
+      const kyokyoiDoc = await kyokyoiAnalysisRef.get();
+
+      if (kyokyoiDoc.exists) {
+        const data = kyokyoiDoc.data();
+        const analyzedAt = new Date(data.analyzed_at);
+        const hoursAgo = (Date.now() - analyzedAt.getTime()) / (1000 * 60 * 60);
+
+        if (hoursAgo < 24) {
+          console.log(`[getExisting] ♻️ kyokyoi에서 기존 결과 재사용 (${hoursAgo.toFixed(1)}시간 전)`);
+          return data;
+        } else {
+          console.log(`[getExisting] ⏰ kyokyoi 기존 결과 만료 (${hoursAgo.toFixed(1)}시간 전)`);
+        }
+      }
+    }
+
+    // 2. kyokyoi-gpt-fn 프로젝트에서도 확인 (백업)
+    const gptAnalysisRef = gptDb.collection("users")
       .doc(userId)
       .collection("taster_analysis")
       .doc("latest");
 
-    const doc = await analysisRef.get();
+    const gptDoc = await gptAnalysisRef.get();
 
-    if (doc.exists) {
-      const data = doc.data();
-
-      // 24시간 이내 결과면 재사용
+    if (gptDoc.exists) {
+      const data = gptDoc.data();
       const analyzedAt = new Date(data.analyzed_at);
       const hoursAgo = (Date.now() - analyzedAt.getTime()) / (1000 * 60 * 60);
 
       if (hoursAgo < 24) {
-        console.log(`[getExisting] ♻️ 기존 결과 재사용 (${hoursAgo.toFixed(1)}시간 전)`);
+        console.log(`[getExisting] ♻️ kyokyoi-gpt-fn에서 기존 결과 재사용 (${hoursAgo.toFixed(1)}시간 전)`);
         return data;
       } else {
-        console.log(`[getExisting] ⏰ 기존 결과 만료 (${hoursAgo.toFixed(1)}시간 전) - 새로 분석 필요`);
+        console.log(`[getExisting] ⏰ kyokyoi-gpt-fn 기존 결과도 만료 (${hoursAgo.toFixed(1)}시간 전)`);
       }
     }
 
