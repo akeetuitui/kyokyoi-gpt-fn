@@ -4,13 +4,14 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const { analyzeTasterType, structureAnalysisResult } = require("./services/analyzeTasterType");
 
-// 🔧 Firebase Admin 초기화 (두 개의 프로젝트 접근)
+// 🔧 Firebase Admin 초기화 (여러 프로젝트 지원)
 // 1. 기본 앱 (kyokyoi-gpt-fn 프로젝트 - 결과 저장용)
 admin.initializeApp();
 const gptDb = admin.firestore(); // kyokyoi-gpt-fn DB
 
 // 2. kyokyoi 프로젝트 앱 (사용자 데이터 읽기용)
 let kyokyoiDb;
+let kyokyoiAuth;
 try {
   // 서비스 계정 키 파일로 kyokyoi 프로젝트에 접근
   const serviceAccount = require("./kyokyoi-service-account.json");
@@ -21,10 +22,63 @@ try {
   }, "kyokyoi");
 
   kyokyoiDb = kyokyoiApp.firestore();
+  kyokyoiAuth = kyokyoiApp.auth();
   console.log("[Firebase] ✅ kyokyoi 프로젝트 연결 성공");
 } catch (error) {
   console.error("[Firebase] ❌ kyokyoi 프로젝트 연결 실패:", error.message);
   console.log("[Firebase] 📝 kyokyoi-service-account.json 파일이 functions/ 폴더에 있는지 확인하세요");
+}
+
+// 3. artlog-app-72ff1 프로젝트 앱 (Flutter 앱 토큰 인증용)
+let artlogAuth;
+try {
+  // artlog-app-72ff1 프로젝트의 서비스 계정이 있다면 사용, 없으면 기본 Admin SDK로 처리
+  const artlogApp = admin.initializeApp({
+    projectId: "artlog-app-72ff1",
+  }, "artlog");
+
+  artlogAuth = artlogApp.auth();
+  console.log("[Firebase] ✅ artlog-app-72ff1 프로젝트 연결 성공");
+} catch (error) {
+  console.error("[Firebase] ❌ artlog-app-72ff1 프로젝트 연결 실패:", error.message);
+  console.log("[Firebase] 📝 artlog-app-72ff1 토큰 검증을 위해 기본 auth 사용");
+}
+
+/**
+ * 다중 프로젝트 토큰 검증
+ */
+async function verifyIdToken(token) {
+  try {
+    // 1. artlog-app-72ff1 토큰 먼저 시도 (현재 Flutter 앱이 사용 중)
+    if (artlogAuth) {
+      try {
+        const decodedToken = await artlogAuth.verifyIdToken(token);
+        console.log(`[verifyToken] ✅ artlog-app-72ff1 토큰 검증 성공: ${decodedToken.uid}`);
+        return decodedToken;
+      } catch (artlogError) {
+        console.log(`[verifyToken] ❌ artlog-app-72ff1 토큰 검증 실패: ${artlogError.message}`);
+      }
+    }
+
+    // 2. kyokyoi 토큰 시도 (폴백)
+    if (kyokyoiAuth) {
+      try {
+        const decodedToken = await kyokyoiAuth.verifyIdToken(token);
+        console.log(`[verifyToken] ✅ kyokyoi 토큰 검증 성공: ${decodedToken.uid}`);
+        return decodedToken;
+      } catch (kyokyoiError) {
+        console.log(`[verifyToken] ❌ kyokyoi 토큰 검증 실패: ${kyokyoiError.message}`);
+      }
+    }
+
+    // 3. 기본 admin auth로 마지막 시도
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    console.log(`[verifyToken] ✅ 기본 auth 토큰 검증 성공: ${decodedToken.uid}`);
+    return decodedToken;
+  } catch (error) {
+    console.error(`[verifyToken] ❌ 모든 토큰 검증 실패: ${error.message}`);
+    throw new Error(`토큰 검증 실패: ${error.message}`);
+  }
 }
 
 /**
@@ -286,7 +340,7 @@ exports.analyzeTasterType = functions
   })
   .https.onCall(async (data, context) => {
     try {
-      // 인증 확인
+      // 인증 확인 - 다중 프로젝트 지원
       if (!context.auth) {
         throw new functions.https.HttpsError(
           "unauthenticated",
@@ -296,6 +350,7 @@ exports.analyzeTasterType = functions
 
       const userId = context.auth.uid;
       console.log(`[analyzeTasterType] 🎯 사용자 ${userId} 분석 요청`);
+      console.log(`[analyzeTasterType] 🔐 토큰 발급자: ${context.auth.token.iss || "unknown"}`);
 
       // 1. 기존 분석 결과 확인
       const existingResult = await getExistingAnalysis(userId);
@@ -419,17 +474,57 @@ app.use(express.json());
 
 app.post("/analyze-taster", async (req, res) => {
   try {
-    const { user_id, records } = req.body;
-
-    if (!user_id || !Array.isArray(records) || records.length < 3) {
-      return res.status(400).json({
-        error: "user_id가 없거나 records가 3개 이상 필요합니다.",
+    // Authorization 헤더에서 토큰 추출
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        error: "UNAUTHENTICATED",
+        message: "Authorization 헤더가 필요합니다.",
       });
     }
 
-    console.log(`[REST /analyze-taster] 분석 요청 시작: ${user_id} (${records.length}개 기록)`);
+    const idToken = authHeader.split("Bearer ")[1];
 
-    const gptResponse = await analyzeTasterType(records);
+    // 토큰 검증
+    let decodedToken;
+    try {
+      decodedToken = await verifyIdToken(idToken);
+      console.log(`[REST /analyze-taster] 🔐 토큰 검증 성공: ${decodedToken.uid}`);
+    } catch (authError) {
+      console.error(`[REST /analyze-taster] ❌ 토큰 검증 실패: ${authError.message}`);
+      return res.status(401).json({
+        error: "UNAUTHENTICATED",
+        message: "유효하지 않은 토큰입니다.",
+      });
+    }
+
+    const userId = decodedToken.uid;
+    const { records } = req.body;
+
+    // 기존 분석 결과 확인
+    const existingResult = await getExistingAnalysis(userId);
+    if (existingResult) {
+      console.log(`[REST /analyze-taster] ♻️ 기존 결과 반환: ${userId}`);
+      return res.status(200).json({
+        success: true,
+        result: existingResult,
+        from_cache: true,
+      });
+    }
+
+    // 사용자 기록 조회 (kyokyoi 프로젝트에서)
+    const userRecords = await getUserNowRecords(userId);
+
+    if (userRecords.length < 3) {
+      return res.status(400).json({
+        error: "FAILED_PRECONDITION",
+        message: `분석을 위해 최소 3개의 의미있는 감상 기록이 필요합니다. (현재: ${userRecords.length}개)`,
+      });
+    }
+
+    console.log(`[REST /analyze-taster] 분석 요청 시작: ${userId} (${userRecords.length}개 기록)`);
+
+    const gptResponse = await analyzeTasterType(userRecords);
     const validationResult = validateAndParseGPTResponse(gptResponse);
 
     if (!validationResult.success) {
@@ -440,8 +535,8 @@ app.post("/analyze-taster", async (req, res) => {
       });
     }
 
-    const finalResult = structureAnalysisResult(user_id, validationResult.data, records);
-    await saveTasterTypeResult(user_id, finalResult);
+    const finalResult = structureAnalysisResult(userId, validationResult.data, userRecords);
+    await saveTasterTypeResult(userId, finalResult);
 
     return res.status(200).json({
       success: true,
