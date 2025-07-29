@@ -39,30 +39,108 @@ async function getUserNowRecords(userId) {
   try {
     console.log(`[getUserNowRecords] 🔍 사용자 ${userId}의 기록 조회 시작`);
 
-    // Firestore 쿼리 실행 (같은 프로젝트이므로 직접 접근)
-    const recordsRef = db.collection("users")
-      .doc(userId)
-      .collection("now_records")
-      .orderBy("createdAt", "desc")
-      .limit(20);
+    // 🔍 사용자 문서 존재 확인
+    const userDocRef = db.collection("users").doc(userId);
+    const userDoc = await userDocRef.get();
 
-    console.log(`[getUserNowRecords] 📋 쿼리 경로: users/${userId}/now_records`);
+    if (!userDoc.exists) {
+      console.log(`[getUserNowRecords] ❌ 사용자 문서 없음: users/${userId}`);
+
+      // 다른 가능한 컬렉션 구조 확인
+      const possibleCollections = ["Users", "user", "USER"];
+      for (const collectionName of possibleCollections) {
+        const altUserDoc = await db.collection(collectionName).doc(userId).get();
+        if (altUserDoc.exists) {
+          console.log(`[getUserNowRecords] ✅ 대체 컬렉션에서 발견: ${collectionName}/${userId}`);
+          break;
+        }
+      }
+
+      return [];
+    }
+
+    console.log(`[getUserNowRecords] ✅ 사용자 문서 존재: users/${userId}`);
+
+    // 🔍 가능한 하위 컬렉션들 확인
+    const possibleSubCollections = ["now_records", "nowRecords", "records", "exhibition_records"];
+    let recordsRef = null;
+    let subCollectionName = null;
+
+    for (const subCollection of possibleSubCollections) {
+      const testRef = db.collection("users")
+        .doc(userId)
+        .collection(subCollection)
+        .limit(1);
+
+      try {
+        const testSnapshot = await testRef.get();
+        if (!testSnapshot.empty) {
+          recordsRef = db.collection("users")
+            .doc(userId)
+            .collection(subCollection)
+            .orderBy("createdAt", "desc")
+            .limit(20);
+          subCollectionName = subCollection;
+          console.log(`[getUserNowRecords] ✅ 하위 컬렉션 발견: ${subCollection} (${testSnapshot.size}개)`);
+          break;
+        }
+      } catch (error) {
+        // orderBy 실패하면 orderBy 없이 시도
+        try {
+          const simpleRef = db.collection("users")
+            .doc(userId)
+            .collection(subCollection)
+            .limit(20);
+          const simpleSnapshot = await simpleRef.get();
+          if (!simpleSnapshot.empty) {
+            recordsRef = simpleRef;
+            subCollectionName = subCollection;
+            console.log(
+              // eslint-disable-next-line max-len
+              `[getUserNowRecords] ✅ 하위 컬렉션 발견 (orderBy 없이): ${subCollection} (${simpleSnapshot.size}개)`,
+            );
+            break;
+          }
+        } catch (simpleError) {
+          console.log(
+            `[getUserNowRecords] ❌ ${subCollection} 접근 실패: ${simpleError.message}`,
+          );
+        }
+      }
+    }
+
+    if (!recordsRef) {
+      console.log("[getUserNowRecords] ❌ 유효한 하위 컬렉션을 찾을 수 없음");
+      return [];
+    }
+
+    console.log(`[getUserNowRecords] 📋 쿼리 경로: users/${userId}/${subCollectionName}`);
 
     let snapshot;
     try {
       snapshot = await recordsRef.get();
-      console.log(`[getUserNowRecords] 📊 ${snapshot.size}개 문서 조회됨`);
+      console.log(`[getUserNowRecords] 📊 ${snapshot.size}개 문서 조회됨 (컬렉션: ${subCollectionName})`);
     } catch (firestoreError) {
       console.error("[getUserNowRecords] ❌ Firestore 쿼리 실패:", {
         code: firestoreError.code,
         message: firestoreError.message,
         details: firestoreError.details || "없음",
+        collection: subCollectionName,
       });
       throw new Error(`Firestore 조회 실패: ${firestoreError.message} (코드: ${firestoreError.code})`);
     }
 
     if (snapshot.empty) {
-      console.log(`[getUserNowRecords] ⚠️ 사용자 ${userId}의 기록이 없음`);
+      console.log(`[getUserNowRecords] ⚠️ 사용자 ${userId}의 기록이 없음 (컬렉션: ${subCollectionName})`);
+
+      // 🔍 디버깅을 위해 모든 하위 컬렉션 확인
+      try {
+        const collections = await db.collection("users").doc(userId).listCollections();
+        console.log("[getUserNowRecords] 📋 사용자의 모든 하위 컬렉션:", collections.map((c) => c.id));
+      } catch (listError) {
+        console.log(`[getUserNowRecords] ❌ 하위 컬렉션 목록 조회 실패: ${listError.message}`);
+      }
+
       return [];
     }
 
@@ -71,9 +149,14 @@ async function getUserNowRecords(userId) {
       const data = doc.data();
 
       // artlog-app-72ff1 Flutter 앱의 ExhibitionRecord 모델과 매핑
-      const exhibitionName = data.exhibitionTitle || data.exhibition_name || data.title || "미상";
+      const exhibitionName = data.exhibitionTitle ||
+                             data.exhibition_name ||
+                             data.title ||
+                             data.name ||
+                             data.exhibitionName ||
+                             "미상";
 
-      // 작가명 추출 (selectedArtist 또는 artistGenres에서)
+      // 작가명 추출 (다양한 필드에서 시도)
       let artistName = "미상";
       if (data.selectedArtist && data.selectedArtist.trim()) {
         artistName = data.selectedArtist;
@@ -86,36 +169,52 @@ async function getUserNowRecords(userId) {
         }
       } else if (data.artistName || data.artist_name) {
         artistName = data.artistName || data.artist_name;
+      } else if (data.artist) {
+        artistName = data.artist;
       }
 
-      // 감상문 필드 정확한 매핑 (artlog-app-72ff1 앱에서 사용하는 필드명)
+      // 감상문 필드 정확한 매핑 (가능한 모든 필드 시도)
       const reviewText = data.inspiration || // 주요 필드 (ExhibitionRecord 모델)
                          data.inspirationText ||
                          data.review_text ||
                          data.reviewText ||
+                         data.review ||
                          data.comment ||
-                         data.memo || "";
+                         data.memo ||
+                         data.note ||
+                         data.description ||
+                         data.content || "";
 
-      // 방문일 처리 (ExhibitionRecord 모델의 visitDate 필드)
+      // 방문일 처리 (다양한 날짜 필드 시도)
       let visitDate = "미상";
-      if (data.visitDate || data.visit_date) {
-        const dateField = data.visitDate || data.visit_date;
-        if (dateField && dateField.toDate) {
-          // Firestore Timestamp
-          visitDate = dateField.toDate().toISOString().split("T")[0];
-        } else if (dateField) {
-          // 이미 문자열이거나 다른 형식
-          visitDate = dateField.toString().split("T")[0];
-        }
-      } else if (data.createdAt) {
-        // visitDate가 없으면 createdAt 사용
-        const createdAt = data.createdAt;
-        if (createdAt && createdAt.toDate) {
-          visitDate = createdAt.toDate().toISOString().split("T")[0];
-        } else if (createdAt) {
-          visitDate = createdAt.toString().split("T")[0];
+      const dateFields = [
+        data.visitDate, data.visit_date, data.createdAt,
+        data.created_at, data.date, data.timestamp,
+      ];
+
+      for (const dateField of dateFields) {
+        if (dateField) {
+          if (dateField.toDate) {
+            // Firestore Timestamp
+            visitDate = dateField.toDate().toISOString().split("T")[0];
+            break;
+          } else if (dateField) {
+            // 이미 문자열이거나 다른 형식
+            visitDate = dateField.toString().split("T")[0];
+            break;
+          }
         }
       }
+
+      // 디버깅: 모든 필드 로그
+      console.log(`[getUserNowRecords] 🔍 문서 ${doc.id} 원본 데이터:`, {
+        exhibitionTitle: data.exhibitionTitle,
+        selectedArtist: data.selectedArtist,
+        inspiration: data.inspiration,
+        visitDate: data.visitDate,
+        createdAt: data.createdAt,
+        allKeys: Object.keys(data),
+      });
 
       // 감상문이 유의미하게 있는 기록만 포함 (최소 3자 이상)
       if (reviewText && reviewText.trim().length >= 3) {
