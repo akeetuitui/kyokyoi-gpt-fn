@@ -56,6 +56,34 @@ async function getUserNowRecords(userId) {
         }
       }
 
+      // 전체 users 컬렉션에서 해당 사용자 검색
+      try {
+        console.log(`[getUserNowRecords] 🔍 전체 users 컬렉션에서 사용자 ${userId} 검색 중...`);
+        const allUsersSnapshot = await db.collection("users").limit(10).get();
+        console.log(`[getUserNowRecords] 📊 users 컬렉션 전체 문서 수 (상위 10개): ${allUsersSnapshot.size}`);
+
+        allUsersSnapshot.forEach((doc) => {
+          console.log(`[getUserNowRecords] 👤 발견된 사용자 ID: ${doc.id}`);
+          if (doc.id === userId) {
+            console.log("[getUserNowRecords] ✅ 일치하는 사용자 발견!");
+          }
+        });
+
+        // uid 필드로도 검색해보기
+        const uidQuerySnapshot = await db.collection("users")
+          .where("uid", "==", userId).limit(5).get();
+        if (!uidQuerySnapshot.empty) {
+          console.log(`[getUserNowRecords] ✅ uid 필드로 사용자 발견: ${uidQuerySnapshot.size}개`);
+          uidQuerySnapshot.forEach((doc) => {
+            console.log(`[getUserNowRecords] 📄 uid 기반 문서 ID: ${doc.id}`);
+          });
+        } else {
+          console.log("[getUserNowRecords] ❌ uid 필드로도 사용자를 찾을 수 없음");
+        }
+      } catch (searchError) {
+        console.log(`[getUserNowRecords] ❌ 사용자 검색 실패: ${searchError.message}`);
+      }
+
       return [];
     }
 
@@ -137,6 +165,37 @@ async function getUserNowRecords(userId) {
       try {
         const collections = await db.collection("users").doc(userId).listCollections();
         console.log("[getUserNowRecords] 📋 사용자의 모든 하위 컬렉션:", collections.map((c) => c.id));
+
+        // 각 하위 컬렉션의 문서 수도 확인
+        for (const collection of collections) {
+          try {
+            const collectionSnapshot = await collection.limit(5).get();
+            console.log(
+              `[getUserNowRecords] 📊 ${collection.id} 컬렉션: ${collectionSnapshot.size}개 문서`,
+            );
+
+            // 첫 번째 문서의 필드 구조 확인
+            if (!collectionSnapshot.empty) {
+              const firstDoc = collectionSnapshot.docs[0];
+              const firstDocData = firstDoc.data();
+              console.log(
+                `[getUserNowRecords] 🔍 ${collection.id} 첫 번째 문서 필드:`,
+                Object.keys(firstDocData),
+              );
+              console.log(`[getUserNowRecords] 📄 ${collection.id} 첫 번째 문서 샘플:`, {
+                id: firstDoc.id,
+                inspiration: firstDocData.inspiration?.substring(0, 50) + "..." || "없음",
+                exhibitionTitle: firstDocData.exhibitionTitle || "없음",
+                createdAt: firstDocData.createdAt ||
+                           firstDocData.created_at || "없음",
+              });
+            }
+          } catch (collectionError) {
+            console.log(
+              `[getUserNowRecords] ❌ ${collection.id} 컬렉션 조회 실패: ${collectionError.message}`,
+            );
+          }
+        }
       } catch (listError) {
         console.log(`[getUserNowRecords] ❌ 하위 컬렉션 목록 조회 실패: ${listError.message}`);
       }
@@ -148,21 +207,33 @@ async function getUserNowRecords(userId) {
     snapshot.forEach((doc) => {
       const data = doc.data();
 
-      // artlog-app-72ff1 Flutter 앱의 ExhibitionRecord 모델과 매핑
-      const exhibitionName = data.exhibitionTitle ||
+      // artlog-app-72ff1 Flutter 앱의 실제 필드명에 맞춰 매핑
+      const exhibitionName = data.exhibition_title ||    // 📋 실제 필드명
+                             data.exhibitionTitle ||     // 이전 호환성
                              data.exhibition_name ||
                              data.title ||
                              data.name ||
                              data.exhibitionName ||
                              "미상";
 
-      // 작가명 추출 (다양한 필드에서 시도)
+      // 작가명 추출 (실제 필드명 우선)
       let artistName = "미상";
-      if (data.selectedArtist && data.selectedArtist.trim()) {
+      if (data.selected_artist && data.selected_artist.trim()) {
+        // 📋 실제 필드명: selected_artist
+        artistName = data.selected_artist;
+      } else if (data.selectedArtist && data.selectedArtist.trim()) {
+        // 이전 호환성: selectedArtist (camelCase)
         artistName = data.selectedArtist;
+      } else if (data.artist_genres && Array.isArray(data.artist_genres) &&
+                 data.artist_genres.length > 0) {
+        // 📋 실제 필드명: artist_genres
+        const firstArtist = data.artist_genres[0];
+        if (firstArtist && firstArtist.artist) {
+          artistName = firstArtist.artist;
+        }
       } else if (data.artistGenres && Array.isArray(data.artistGenres) &&
                  data.artistGenres.length > 0) {
-        // artistGenres에서 첫 번째 작가명 추출
+        // 이전 호환성: artistGenres
         const firstArtist = data.artistGenres[0];
         if (firstArtist && firstArtist.artistName) {
           artistName = firstArtist.artistName;
@@ -173,8 +244,8 @@ async function getUserNowRecords(userId) {
         artistName = data.artist;
       }
 
-      // 감상문 필드 정확한 매핑 (가능한 모든 필드 시도)
-      const reviewText = data.inspiration || // 주요 필드 (ExhibitionRecord 모델)
+      // 감상문 필드 (실제 필드명 우선)
+      const reviewText = data.inspiration ||             // 📋 실제 필드명
                          data.inspirationText ||
                          data.review_text ||
                          data.reviewText ||
@@ -185,11 +256,15 @@ async function getUserNowRecords(userId) {
                          data.description ||
                          data.content || "";
 
-      // 방문일 처리 (다양한 날짜 필드 시도)
+      // 방문일 처리 (실제 필드명 우선)
       let visitDate = "미상";
       const dateFields = [
-        data.visitDate, data.visit_date, data.createdAt,
-        data.created_at, data.date, data.timestamp,
+        data.visit_date,    // 📋 실제 필드명
+        data.visitDate,     // 이전 호환성
+        data.created_at,    // 📋 실제 필드명
+        data.createdAt,     // 이전 호환성
+        data.date,
+        data.timestamp,
       ];
 
       for (const dateField of dateFields) {
@@ -198,19 +273,28 @@ async function getUserNowRecords(userId) {
             // Firestore Timestamp
             visitDate = dateField.toDate().toISOString().split("T")[0];
             break;
+          } else if (typeof dateField === "string") {
+            // 문자열 형식 날짜
+            visitDate = dateField.split("T")[0];
+            break;
           } else if (dateField) {
-            // 이미 문자열이거나 다른 형식
+            // 기타 형식
             visitDate = dateField.toString().split("T")[0];
             break;
           }
         }
       }
 
-      // 디버깅: 모든 필드 로그
+      // 디버깅: 모든 필드 로그 (실제 필드명 기준)
       console.log(`[getUserNowRecords] 🔍 문서 ${doc.id} 원본 데이터:`, {
+        exhibition_title: data.exhibition_title,      // 📋 실제 필드명
+        selected_artist: data.selected_artist,        // 📋 실제 필드명
+        inspiration: data.inspiration,                // 📋 실제 필드명
+        visit_date: data.visit_date,                  // 📋 실제 필드명
+        created_at: data.created_at,                  // 📋 실제 필드명
+        // 이전 호환성 필드들
         exhibitionTitle: data.exhibitionTitle,
         selectedArtist: data.selectedArtist,
-        inspiration: data.inspiration,
         visitDate: data.visitDate,
         createdAt: data.createdAt,
         allKeys: Object.keys(data),
@@ -224,15 +308,21 @@ async function getUserNowRecords(userId) {
           artist_name: artistName,
           review_text: reviewText.trim(),
           visit_date: visitDate,
-          created_at: data.createdAt
-            ? (data.createdAt.toDate
-              ? data.createdAt.toDate().toISOString()
-              : data.createdAt.toString())
-            : (data.created_at
-              ? (data.created_at.toDate
-                ? data.created_at.toDate().toISOString()
-                : data.created_at.toString())
+          created_at: data.created_at        // 📋 실제 필드명 사용
+            ? (data.created_at.toDate
+              ? data.created_at.toDate().toISOString()
+              : data.created_at.toString())
+            : (data.createdAt              // 이전 호환성
+              ? (data.createdAt.toDate
+                ? data.createdAt.toDate().toISOString()
+                : data.createdAt.toString())
               : "미상"),
+          // 📋 추가 메타데이터 (분석 품질 향상)
+          rating: data.rating || null,
+          companion_type: data.companion_type || data.companionType || null,
+          exhibition_type: data.exhibition_type || data.exhibitionType || null,
+          exhibition_gallery_name: data.exhibition_gallery_name ||
+                                   data.exhibitionGalleryName || null,
         });
 
         console.log(
@@ -546,6 +636,100 @@ exports.getTasterType = functions
     }
   });
 
+/**
+ * 🔍 디버그: 특정 사용자의 데이터 구조 조사
+ */
+async function debugUserData(userId) {
+  try {
+    console.log(`[debugUserData] 🔍 사용자 ${userId} 데이터 구조 조사 시작`);
+
+    const results = {
+      userDoc: null,
+      collections: {},
+      subcollections: {},
+      timestamp: new Date().toISOString(),
+    };
+
+    // 1. 사용자 문서 확인
+    const userDocRef = db.collection("users").doc(userId);
+    const userDoc = await userDocRef.get();
+
+    if (userDoc.exists) {
+      results.userDoc = userDoc.data();
+      console.log(`[debugUserData] ✅ 사용자 문서 발견: users/${userId}`);
+
+      // 2. 하위 컬렉션 목록 조회
+      const subcollections = await userDocRef.listCollections();
+      console.log(`[debugUserData] 📁 하위 컬렉션 개수: ${subcollections.length}`);
+
+      for (const subcollection of subcollections) {
+        const collectionName = subcollection.id;
+        console.log(`[debugUserData] 📂 하위 컬렉션 발견: ${collectionName}`);
+
+        // 각 하위 컬렉션의 문서들 조회 (최대 10개)
+        const snapshot = await subcollection.limit(10).get();
+        console.log(`[debugUserData] 📄 ${collectionName} 문서 개수: ${snapshot.size}`);
+
+        results.subcollections[collectionName] = {
+          count: snapshot.size,
+          documents: [],
+        };
+
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          results.subcollections[collectionName].documents.push({
+            id: doc.id,
+            fields: Object.keys(data),
+            sampleData: Object.keys(data).reduce((acc, key) => {
+              acc[key] = typeof data[key];
+              return acc;
+            }, {}),
+          });
+        });
+      }
+    } else {
+      console.log(`[debugUserData] ❌ 사용자 문서 없음: users/${userId}`);
+
+      // 3. 다른 가능한 컬렉션 구조 확인
+      const possibleCollections = ["Users", "user", "USER", "now_records", "nowRecords", "records"];
+
+      for (const collectionName of possibleCollections) {
+        try {
+          const collectionRef = db.collection(collectionName);
+
+          // userId로 문서 직접 조회
+          const userDocInCollection = await collectionRef.doc(userId).get();
+          if (userDocInCollection.exists) {
+            console.log(`[debugUserData] ✅ 발견: ${collectionName}/${userId}`);
+            results.collections[collectionName] = userDocInCollection.data();
+            continue;
+          }
+
+          // userId 필드로 쿼리
+          const querySnapshot = await collectionRef.where("userId", "==", userId).limit(5).get();
+          if (!querySnapshot.empty) {
+            console.log(
+              `[debugUserData] ✅ userId 필드로 발견: ${collectionName} (${querySnapshot.size}개)`,
+            );
+            results.collections[collectionName] = querySnapshot.docs.map((doc) => ({
+              id: doc.id,
+              data: doc.data(),
+            }));
+          }
+        } catch (error) {
+          console.log(`[debugUserData] ⚠️ ${collectionName} 조회 실패: ${error.message}`);
+        }
+      }
+    }
+
+    console.log("[debugUserData] 📊 조사 완료:", JSON.stringify(results, null, 2));
+    return results;
+  } catch (error) {
+    console.error("[debugUserData] ❌ 에러:", error);
+    throw error;
+  }
+}
+
 // REST API 방식도 동일하게 수정
 const express = require("express");
 const cors = require("cors");
@@ -646,6 +830,46 @@ app.post("/analyze-taster", async (req, res) => {
     console.error("[REST /analyze-taster] 오류 발생:", err);
     return res.status(500).json({
       error: "분석 실패",
+      message: err.message,
+    });
+  }
+});
+
+// 디버그용 API 엔드포인트
+app.post("/debug-user-data", async (req, res) => {
+  console.log("[REST /debug-user-data] 🔍 디버그 API 호출 시작");
+
+  try {
+    // Authorization 헤더에서 토큰 추출
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        error: "UNAUTHENTICATED",
+        message: "Authorization 헤더가 필요합니다.",
+      });
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+
+    // 토큰 검증
+    const decodedToken = await verifyIdToken(idToken);
+    const userId = decodedToken.uid;
+
+    console.log(`[REST /debug-user-data] 👤 사용자 ID: ${userId}`);
+
+    // 디버그 데이터 조사 실행
+    const debugResults = await debugUserData(userId);
+
+    return res.status(200).json({
+      success: true,
+      userId: userId,
+      debugData: debugResults,
+      message: "사용자 데이터 구조 조사 완료",
+    });
+  } catch (err) {
+    console.error("[REST /debug-user-data] 오류 발생:", err);
+    return res.status(500).json({
+      error: "디버그 조사 실패",
       message: err.message,
     });
   }
