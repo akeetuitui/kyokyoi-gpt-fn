@@ -103,11 +103,35 @@ async function getUserNowRecords(userId) {
       try {
         const testSnapshot = await testRef.get();
         if (!testSnapshot.empty) {
-          recordsRef = db.collection("users")
-            .doc(userId)
-            .collection(subCollection)
-            .orderBy("createdAt", "desc")
-            .limit(20);
+          // 📋 실제 필드명 우선 사용: created_at -> createdAt 순서로 시도
+          let recordsRef;
+          try {
+            recordsRef = db.collection("users")
+              .doc(userId)
+              .collection(subCollection)
+              .orderBy("created_at", "desc")  // 📋 실제 필드명 우선
+              .limit(20);
+            await recordsRef.get(); // 쿼리 유효성 테스트
+            console.log(`[getUserNowRecords] ✅ created_at 필드로 정렬 성공: ${subCollection}`);
+          } catch (orderError) {
+            console.log(`[getUserNowRecords] ⚠️ created_at 정렬 실패, createdAt 시도: ${orderError.message}`);
+            try {
+              recordsRef = db.collection("users")
+                .doc(userId)
+                .collection(subCollection)
+                .orderBy("createdAt", "desc")  // 이전 호환성
+                .limit(20);
+              await recordsRef.get(); // 쿼리 유효성 테스트  
+              console.log(`[getUserNowRecords] ✅ createdAt 필드로 정렬 성공: ${subCollection}`);
+            } catch (fallbackError) {
+              console.log(`[getUserNowRecords] ⚠️ 정렬 없이 시도: ${fallbackError.message}`);
+              recordsRef = db.collection("users")
+                .doc(userId)
+                .collection(subCollection)
+                .limit(20);
+            }
+          }
+          
           subCollectionName = subCollection;
           console.log(`[getUserNowRecords] ✅ 하위 컬렉션 발견: ${subCollection} (${testSnapshot.size}개)`);
           break;
@@ -350,17 +374,18 @@ async function getUserNowRecords(userId) {
     return records;
   } catch (error) {
     console.error("[getUserNowRecords] ❌ 기록 조회 실패:", {
+      userId: userId,
       message: error.message,
       code: error.code || "없음",
       details: error.details || "없음",
-      stack: error.stack?.split("\n").slice(0, 3).join("\n"), // 스택 트레이스 일부만
+      stack: error.stack?.split("\n").slice(0, 5).join("\n"), // 더 많은 스택 트레이스
     });
 
     // 더 구체적인 오류 메시지 제공
     if (error.message.includes("NOT_FOUND") || error.code === 5) {
       const userIdShort = userId ? userId.substring(0, 8) + "..." : "없음";
       throw new Error(
-        `사용자 데이터 조회 실패: 사용자 데이터를 찾을 수 없습니다. 사용자 ID: ${userIdShort}`,
+        `Firestore 컬렉션을 찾을 수 없습니다. 사용자 ID: ${userIdShort}`,
       );
     } else if (error.message.includes("PERMISSION_DENIED")) {
       throw new Error("권한 오류: Firestore 접근 권한이 없습니다.");
