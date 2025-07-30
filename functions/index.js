@@ -104,34 +104,41 @@ async function getUserNowRecords(userId) {
         const testSnapshot = await testRef.get();
         if (!testSnapshot.empty) {
           // 📋 실제 필드명 우선 사용: created_at -> createdAt 순서로 시도
-          let recordsRef;
           try {
             recordsRef = db.collection("users")
               .doc(userId)
               .collection(subCollection)
-              .orderBy("created_at", "desc")  // 📋 실제 필드명 우선
+              .orderBy("created_at", "desc") // 📋 실제 필드명 우선
               .limit(20);
             await recordsRef.get(); // 쿼리 유효성 테스트
-            console.log(`[getUserNowRecords] ✅ created_at 필드로 정렬 성공: ${subCollection}`);
+            console.log(
+              `[getUserNowRecords] ✅ created_at 필드로 정렬 성공: ${subCollection}`,
+            );
           } catch (orderError) {
-            console.log(`[getUserNowRecords] ⚠️ created_at 정렬 실패, createdAt 시도: ${orderError.message}`);
+            console.log(
+              `[getUserNowRecords] ⚠️ created_at 정렬 실패, createdAt 시도: ${orderError.message}`,
+            );
             try {
               recordsRef = db.collection("users")
                 .doc(userId)
                 .collection(subCollection)
-                .orderBy("createdAt", "desc")  // 이전 호환성
+                .orderBy("createdAt", "desc") // 이전 호환성
                 .limit(20);
-              await recordsRef.get(); // 쿼리 유효성 테스트  
-              console.log(`[getUserNowRecords] ✅ createdAt 필드로 정렬 성공: ${subCollection}`);
+              await recordsRef.get(); // 쿼리 유효성 테스트
+              console.log(
+                `[getUserNowRecords] ✅ createdAt 필드로 정렬 성공: ${subCollection}`,
+              );
             } catch (fallbackError) {
-              console.log(`[getUserNowRecords] ⚠️ 정렬 없이 시도: ${fallbackError.message}`);
+              console.log(
+                `[getUserNowRecords] ⚠️ 정렬 없이 시도: ${fallbackError.message}`,
+              );
               recordsRef = db.collection("users")
                 .doc(userId)
                 .collection(subCollection)
                 .limit(20);
             }
           }
-          
+
           subCollectionName = subCollection;
           console.log(`[getUserNowRecords] ✅ 하위 컬렉션 발견: ${subCollection} (${testSnapshot.size}개)`);
           break;
