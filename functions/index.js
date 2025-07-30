@@ -46,45 +46,11 @@ async function getUserNowRecords(userId) {
     if (!userDoc.exists) {
       console.log(`[getUserNowRecords] ❌ 사용자 문서 없음: users/${userId}`);
 
-      // 다른 가능한 컬렉션 구조 확인
-      const possibleCollections = ["Users", "user", "USER"];
-      for (const collectionName of possibleCollections) {
-        const altUserDoc = await db.collection(collectionName).doc(userId).get();
-        if (altUserDoc.exists) {
-          console.log(`[getUserNowRecords] ✅ 대체 컬렉션에서 발견: ${collectionName}/${userId}`);
-          break;
-        }
-      }
-
-      // 전체 users 컬렉션에서 해당 사용자 검색
-      try {
-        console.log(`[getUserNowRecords] 🔍 전체 users 컬렉션에서 사용자 ${userId} 검색 중...`);
-        const allUsersSnapshot = await db.collection("users").limit(10).get();
-        console.log(`[getUserNowRecords] 📊 users 컬렉션 전체 문서 수 (상위 10개): ${allUsersSnapshot.size}`);
-
-        allUsersSnapshot.forEach((doc) => {
-          console.log(`[getUserNowRecords] 👤 발견된 사용자 ID: ${doc.id}`);
-          if (doc.id === userId) {
-            console.log("[getUserNowRecords] ✅ 일치하는 사용자 발견!");
-          }
-        });
-
-        // uid 필드로도 검색해보기
-        const uidQuerySnapshot = await db.collection("users")
-          .where("uid", "==", userId).limit(5).get();
-        if (!uidQuerySnapshot.empty) {
-          console.log(`[getUserNowRecords] ✅ uid 필드로 사용자 발견: ${uidQuerySnapshot.size}개`);
-          uidQuerySnapshot.forEach((doc) => {
-            console.log(`[getUserNowRecords] 📄 uid 기반 문서 ID: ${doc.id}`);
-          });
-        } else {
-          console.log("[getUserNowRecords] ❌ uid 필드로도 사용자를 찾을 수 없음");
-        }
-      } catch (searchError) {
-        console.log(`[getUserNowRecords] ❌ 사용자 검색 실패: ${searchError.message}`);
-      }
-
-      return [];
+      // 🔧 더 자세한 디버깅 정보 추가
+      const errorMsg = "Firestore 컬렉션을 찾을 수 없습니다. " +
+        `사용자 ID: ${userId.substring(0, 8)}... ` +
+        `(문서 경로: users/${userId})`;
+      throw new Error(errorMsg);
     }
 
     console.log(`[getUserNowRecords] ✅ 사용자 문서 존재: users/${userId}`);
@@ -769,6 +735,26 @@ const app = express();
 
 app.use(cors({ origin: true }));
 app.use(express.json());
+
+// 모든 요청을 로그로 기록
+app.use((req, res, next) => {
+  console.log(`[API] ${req.method} ${req.url}`);
+  console.log("[API] Headers:", JSON.stringify(req.headers, null, 2));
+  console.log("[API] Body:", JSON.stringify(req.body, null, 2));
+  next();
+});
+
+// 기본 라우트 추가 (헬스체크용)
+app.get("/", (req, res) => {
+  res.json({
+    message: "kyokyoi-gpt-fn API is running",
+    endpoints: [
+      "POST /analyze-taster",
+      "POST /debug-user-data",
+    ],
+    timestamp: new Date().toISOString(),
+  });
+});
 
 app.post("/analyze-taster", async (req, res) => {
   console.log("[REST /analyze-taster] 🚀 REST API 호출 시작");
