@@ -419,35 +419,20 @@ function validateAndParseGPTResponse(gptResponse) {
 }
 
 /**
- * 분석 결과 저장 (같은 프로젝트이므로 단순)
+ * 분석 결과 저장 (taster_analysis/latest에 저장)
  */
 async function saveTasterTypeResult(userId, result) {
   try {
     console.log(`[saveTasterType] 사용자 ${userId} 결과 저장 시작`);
 
-    // artlog-app-72ff1 프로젝트에 저장 (데이터와 Functions가 같은 프로젝트)
+    // taster_analysis/latest에 저장 
     const analysisRef = db.collection("users")
       .doc(userId)
       .collection("taster_analysis")
       .doc("latest");
 
     await analysisRef.set(result);
-    console.log("[saveTasterType] ✅ 분석 결과 저장 완료");
-
-    // users/{userId} 문서에도 요약 정보 저장
-    const userRef = db.collection("users").doc(userId);
-    await userRef.update({
-      taster_type: {
-        artist_type: result.artist_type,
-        artist_name: result.artist_name,
-        modal_type: result.modal_type,
-        confidence: result.confidence,
-        analyzed_at: admin.firestore.Timestamp.now(),
-        has_analysis: true,
-      },
-    });
-
-    console.log(`[saveTasterType] 🎯 최종 저장 완료: ${result.artist_type} (${result.artist_name})`);
+    console.log(`[saveTasterType] ✅ 분석 결과 저장 완료: ${result.artist_type} (${result.artist_name})`);
   } catch (error) {
     console.error("[saveTasterType] ❌ 저장 실패:", error);
     throw error;
