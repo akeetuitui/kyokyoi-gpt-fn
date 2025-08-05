@@ -4,7 +4,7 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const { analyzeTasterType, structureAnalysisResult } = require("./services/analyzeTasterType");
 
-// 🔧 Firebase Admin 초기화 (단일 프로젝트 - artlog-app-72ff1)
+// Firebase Admin 초기화 (단일 프로젝트 - artlog-app-72ff1)
 admin.initializeApp();
 const db = admin.firestore(); // artlog-app-72ff1 DB (데이터와 같은 프로젝트)
 const auth = admin.auth(); // artlog-app-72ff1 Auth
@@ -12,7 +12,7 @@ const auth = admin.auth(); // artlog-app-72ff1 Auth
 console.log("[Firebase] ✅ artlog-app-72ff1 프로젝트 초기화 완료 (데이터와 Functions 동일 프로젝트)");
 
 /**
- * 토큰 검증 (같은 프로젝트이므로 간단)
+ * 토큰 검증
  */
 async function verifyIdToken(token) {
   console.log(`[verifyToken] 🔍 토큰 검증 시작 (길이: ${token ? token.length : 0})`);
@@ -33,7 +33,7 @@ async function verifyIdToken(token) {
 }
 
 /**
- * 사용자의 NOW 기록 가져오기 (같은 프로젝트이므로 직접 접근)
+ * 사용자의 NOW 기록 가져오기
  */
 async function getUserNowRecords(userId) {
   try {
@@ -425,7 +425,7 @@ async function saveTasterTypeResult(userId, result) {
   try {
     console.log(`[saveTasterType] 사용자 ${userId} 결과 저장 시작`);
 
-    // taster_analysis/latest에 저장 
+    // taster_analysis/latest에 저장
     const analysisRef = db.collection("users")
       .doc(userId)
       .collection("taster_analysis")
@@ -440,7 +440,7 @@ async function saveTasterTypeResult(userId, result) {
 }
 
 /**
- * 기존 분석 결과 확인 (같은 프로젝트이므로 단순)
+ * 기존 분석 결과 확인
  */
 async function getExistingAnalysis(userId) {
   try {
