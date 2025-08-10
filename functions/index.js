@@ -423,9 +423,14 @@ function validateAndParseGPTResponse(gptResponse) {
  */
 async function saveTasterTypeResult(userId, result) {
   try {
-    console.log(`[saveTasterType] 사용자 ${userId} 결과 저장 시작`);
+    console.log(
+      `[saveTasterType] 🚫 USERS 컬렉션에 TASTER_TYPE 저장 안함 - 사용자 ${userId} 결과 저장 시작`,
+    );
+    console.log(
+      `[saveTasterType] 💾 저장 위치: users/${userId}/taster_analysis/latest (NOT users/${userId})`,
+    );
 
-    // taster_analysis/latest에 저장
+    // ⚠️ 중요: users 컬렉션 루트에 저장하지 않음, 오직 taster_analysis/latest에만 저장
     const analysisRef = db.collection("users")
       .doc(userId)
       .collection("taster_analysis")
@@ -433,6 +438,7 @@ async function saveTasterTypeResult(userId, result) {
 
     await analysisRef.set(result);
     console.log(`[saveTasterType] ✅ 분석 결과 저장 완료: ${result.artist_type} (${result.artist_name})`);
+    console.log("[saveTasterType] 🔒 확인: users 컬렉션 루트에는 taster_type 필드 저장되지 않음");
   } catch (error) {
     console.error("[saveTasterType] ❌ 저장 실패:", error);
     throw error;
