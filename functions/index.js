@@ -46,6 +46,102 @@ async function getUserNowRecords(userId) {
     if (!userDoc.exists) {
       console.log(`[getUserNowRecords] ❌ 사용자 문서 없음: users/${userId}`);
 
+app.post(["/analyze-taster", "/analyzeTasterType"], async (req, res) => {
+  console.log("[REST /analyze-taster] 🚀 REST API 호출 시작");
+  console.log("[REST /analyze-taster] 📋 요청 헤더:", {
+    "content-type": req.headers["content-type"],
+    "authorization": req.headers.authorization ?
+      `Bearer ${req.headers.authorization.substring(7, 20)}...` : "없음",
+    "user-agent": req.headers["user-agent"],
+    "origin": req.headers.origin || "없음",
+  });
+
+  try {
+    // Authorization 헤더에서 토큰 추출
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.error("[REST /analyze-taster] ❌ Authorization 헤더 누락 또는 잘못됨:", authHeader);
+      return res.status(401).json({
+        error: "UNAUTHENTICATED",
+        message: "Authorization 헤더가 필요합니다.",
+      });
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    console.log(`[REST /analyze-taster] 🔑 토큰 추출 성공 (길이: ${idToken.length})`);
+
+    // 토큰 검증
+    let decodedToken;
+    try {
+      decodedToken = await verifyIdToken(idToken);
+      console.log(`[REST /analyze-taster] 🔐 토큰 검증 성공: ${decodedToken.uid}`);
+      console.log(
+        `[REST /analyze-taster] 📋 토큰 정보: 발급자=${decodedToken.iss}, 대상=${decodedToken.aud}`,
+      );
+    } catch (authError) {
+      console.error(`[REST /analyze-taster] ❌ 토큰 검증 실패: ${authError.message}`);
+      return res.status(401).json({
+        error: "UNAUTHENTICATED",
+        message: `유효하지 않은 토큰입니다: ${authError.message}`,
+        details: authError.message,
+      });
+    }
+
+    const userId = decodedToken.uid;
+    console.log(`[REST /analyze-taster] 👤 사용자 ID 확인: ${userId}`);
+
+    const { records } = req.body;
+    console.log(`[REST /analyze-taster] 📊 요청 바디에서 받은 기록 수: ${records ? records.length : 0}`);
+
+    // 기존 분석 결과 확인
+    const existingResult = await getExistingAnalysis(userId);
+    if (existingResult) {
+      console.log(`[REST /analyze-taster] ♻️ 기존 결과 반환: ${userId}`);
+      return res.status(200).json({
+        success: true,
+        result: existingResult,
+        from_cache: true,
+      });
+    }
+
+    // 사용자 기록 조회 (같은 프로젝트에서)
+    const userRecords = await getUserNowRecords(userId);
+
+    if (userRecords.length < 3) {
+      return res.status(400).json({
+        error: "FAILED_PRECONDITION",
+        message: `분석을 위해 최소 3개의 의미있는 감상 기록이 필요합니다. (현재: ${userRecords.length}개)`,
+      });
+    }
+
+    console.log(`[REST /analyze-taster] 분석 요청 시작: ${userId} (${userRecords.length}개 기록)`);
+
+    const gptResponse = await analyzeTasterType(userRecords);
+    const validationResult = validateAndParseGPTResponse(gptResponse);
+
+    if (!validationResult.success) {
+      return res.status(500).json({
+        error: "GPT 응답 파싱 실패",
+        message: validationResult.message,
+        raw: gptResponse,
+      });
+    }
+
+    const finalResult = structureAnalysisResult(userId, validationResult.data, userRecords);
+    await saveTasterTypeResult(userId, finalResult);
+
+    return res.status(200).json({
+      success: true,
+      result: finalResult,
+    });
+  } catch (err) {
+    console.error("[REST /analyze-taster] 오류 발생:", err);
+    return res.status(500).json({
+      error: "분석 실패",
+      message: err.message,
+    });
+  }
+});
       // 🔧 더 자세한 디버깅 정보 추가
       const errorMsg = "Firestore 컬렉션을 찾을 수 없습니다. " +
         `사용자 ID: ${userId.substring(0, 8)}... ` +
