@@ -843,7 +843,7 @@ app.get("/", (req, res) => {
   });
 });
 
-app.post("/analyze-taster", async (req, res) => {
+app.post(["/analyze-taster", "/analyzeTasterType"], async (req, res) => {
   console.log("[REST /analyze-taster] 🚀 REST API 호출 시작");
   console.log("[REST /analyze-taster] 📋 요청 헤더:", {
     "content-type": req.headers["content-type"],
