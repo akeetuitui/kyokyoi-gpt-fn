@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "artlog-app-72ff1"
-  }
+    "default": "artlog-app-72ff1",
+    "gptfn": "kyokyoi-gpt-fn"
+  },
+  "targets": {},
+  "etags": {}
 }
